@@ -167,12 +167,37 @@ function selectCandidate(rank) {
 // --------------------------------------------------------------------------
 // Star Ratings
 // --------------------------------------------------------------------------
-function paintStars(container, value) {
+// `value` is the rating to *display*. `committed` (optional) is the actually
+// saved rating; when it differs from `value` we're mid-hover-preview, so we
+// paint with a distinct color instead of the "committed" gold.
+function paintStars(container, value, committed) {
   if (!container) return;
-  container.dataset.rating = value;
+  if (committed === undefined) committed = value;
+  const isPreview = value !== committed;
+  container.dataset.rating = committed;
   container.querySelectorAll('.star').forEach(s => {
-    s.classList.toggle('filled', parseInt(s.dataset.val, 10) <= value);
+    const on = parseInt(s.dataset.val, 10) <= value;
+    s.textContent = on ? '★' : '☆';
+    s.classList.toggle('filled', on && !isPreview);
+    s.classList.toggle('preview', on && isPreview);
   });
+  paintRatingChip(container, committed);
+}
+
+// Adds/updates a small "4/5" / "Not rated" chip next to a stars container,
+// and toggles a rated-state background cue on the enclosing rating row.
+function paintRatingChip(container, value) {
+  let chip = container.parentElement?.querySelector('.rating-chip');
+  if (!chip) return;
+  const rated = value > 0;
+  chip.textContent = rated ? `${value}/5` : 'Not rated';
+  chip.classList.toggle('is-rated', rated);
+  chip.classList.toggle('is-unrated', !rated);
+
+  const ratingRow = document.getElementById('ratingRow');
+  if (ratingRow && ratingRow.contains(container)) {
+    ratingRow.classList.toggle('is-rated', rated);
+  }
 }
 
 async function rateCandidate(rank, stars) {
@@ -209,15 +234,24 @@ async function rateCandidate(rank, stars) {
 }
 
 function updateListRowStars(rank, value) {
-  const row = document.querySelector(`.entry-row[data-rank="${rank}"] .rated-stars`);
-  if (!row) return;
-  row.innerHTML = starsGlyph(value);
+  const entryRow = document.querySelector(`.entry-row[data-rank="${rank}"]`);
+  if (!entryRow) return;
+  const starsEl = entryRow.querySelector('.rated-stars');
+  if (starsEl) starsEl.innerHTML = starsGlyph(value);
+  const chip = entryRow.querySelector('.rating-chip');
+  if (chip) {
+    const rated = value > 0;
+    chip.textContent = rated ? `${value}/5` : '—';
+    chip.classList.toggle('is-rated', rated);
+    chip.classList.toggle('is-unrated', !rated);
+  }
+  entryRow.classList.toggle('is-rated', value > 0);
 }
 
 function starsGlyph(value) {
   let html = '';
   for (let i = 1; i <= 5; i++) {
-    html += i <= value ? '<span class="on">★</span>' : '<span>★</span>';
+    html += i <= value ? '<span class="on">★</span>' : '<span>☆</span>';
   }
   return html;
 }
@@ -233,7 +267,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const starsContainer = document.getElementById('candStars');
   if (starsContainer) {
     starsContainer.querySelectorAll('.star').forEach(s => {
-      s.addEventListener('mouseenter', () => paintStars(starsContainer, parseInt(s.dataset.val, 10)));
+      s.addEventListener('mouseenter', () => {
+        const committed = parseInt(starsContainer.dataset.rating || '0', 10);
+        paintStars(starsContainer, parseInt(s.dataset.val, 10), committed);
+      });
       s.addEventListener('click', () => {
         const val = parseInt(s.dataset.val, 10);
         const current = parseInt(starsContainer.dataset.rating || '0', 10);
@@ -280,9 +317,10 @@ function renderEntries(rows) {
   if (!list) return;
 
   list.innerHTML = rows.map(r => `
-    <li class="entry-row cursor-pointer px-4 py-3 hover:bg-[#EDE3CC]/60 transition-colors ${r.found ? '' : 'opacity-50'} ${r.rank === state.selectedCandidate ? 'active' : ''}" data-rank="${r.rank}">
+    <li class="entry-row cursor-pointer px-4 py-3 hover:bg-[#EDE3CC]/60 transition-colors ${r.found ? '' : 'opacity-50'} ${r.rank === state.selectedCandidate ? 'active' : ''} ${r.stars ? 'is-rated' : ''}" data-rank="${r.rank}">
       <div class="flex items-center gap-3">
         <span class="rated-stars w-14 shrink-0">${starsGlyph(r.stars || 0)}</span>
+        <span class="rating-chip w-14 text-center shrink-0 ${r.stars ? 'is-rated' : 'is-unrated'}">${r.stars ? `${r.stars}/5` : '—'}</span>
         <span class="mono text-xs font-bold text-[#7A6F58] w-7 shrink-0">#${r.rank}</span>
         <div class="flex-1 min-w-0">
           <p class="arabic text-sm font-medium truncate">${r.filename}</p>

@@ -29,10 +29,23 @@
 
     /* Star rating widget */
     .stars { display:inline-flex; gap:2px; }
-    .stars .star { font-size:19px; line-height:1; cursor:pointer; color:#D8C9A8; transition:.1s; user-select:none; }
-    .stars .star.filled { color:#B8863B; }
-    .rated-stars { font-size:11px; letter-spacing:1px; color:#D8C9A8; }
+    .stars .star { font-size:20px; line-height:1; cursor:pointer; color:#C9BB9C; transition:.1s; user-select:none; }
+    /* Committed rating: solid star, strong accent color */
+    .stars .star.filled { color:#B8863B; text-shadow: 0 0 0 currentColor; }
+    /* Hover preview (not yet committed): lighter, distinct from committed gold */
+    .stars .star.preview { color:#2B3A55; }
+    .rated-stars { font-size:13px; letter-spacing:1px; color:#C9BB9C; }
     .rated-stars .on { color:#B8863B; }
+
+    /* Numeric rating chip: e.g. "4/5" or "Not rated" */
+    .rating-chip { font-family:'Space Mono',monospace; font-size:11px; font-weight:700; letter-spacing:.03em; padding:2px 8px; border-radius:999px; white-space:nowrap; }
+    .rating-chip.is-rated { color:#FFFDF8; background:#B8863B; }
+    .rating-chip.is-unrated { color:#9C9080; background:#EDE3CC; }
+
+    /* Rated-state background cue for the "Your Rating" row and list rows */
+    #ratingRow.is-rated { background:rgba(184,134,59,0.08); border-color:#B8863B !important; }
+    .entry-row.is-rated { border-left: 3px solid #B8863B; background: rgba(184,134,59,0.05); }
+    .entry-row.is-rated.active { background: rgba(43,58,85,0.08); border-left-color:#2B3A55; }
 
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: #D8C9A8; border-radius: 4px; }
@@ -139,12 +152,13 @@
                 <div id="ratingRow" class="hidden flex items-center gap-3 pt-3 border-t border-dashed border-[#D8C9A8]">
                   <span class="text-[10px] uppercase tracking-widest text-[#7A6F58] font-bold">Your Rating</span>
                   <div id="candStars" class="stars">
-                    <span class="star" data-val="1">★</span>
-                    <span class="star" data-val="2">★</span>
-                    <span class="star" data-val="3">★</span>
-                    <span class="star" data-val="4">★</span>
-                    <span class="star" data-val="5">★</span>
+                    <span class="star" data-val="1">☆</span>
+                    <span class="star" data-val="2">☆</span>
+                    <span class="star" data-val="3">☆</span>
+                    <span class="star" data-val="4">☆</span>
+                    <span class="star" data-val="5">☆</span>
                   </div>
+                  <span class="rating-chip is-unrated">Not rated</span>
                   <button id="clearRatingBtn" class="text-[10px] mono text-[#7A6F58] hover:text-[#9C4A3E] ml-auto">clear</button>
                 </div>
               </div>
