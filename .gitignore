@@ -1,0 +1,78 @@
+# ---------------------------------------------------------------------------
+# Python / Flask backend
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Packaging
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Env vars / secrets
+.env
+.env.*
+!.env.example
+
+# Flask
+instance/
+.flaskenv
+
+# ---------------------------------------------------------------------------
+# Test tooling
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# ---------------------------------------------------------------------------
+# Node / frontend (Vitest, Playwright)
+# ---------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Vitest
+frontend/coverage/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
+frontend/blob-report/
+
+# ---------------------------------------------------------------------------
+# Data / generated output
+# ---------------------------------------------------------------------------
+graphify-out/
+cache/
+*.log
+
+# Pre-removal backup of the mood-labeled dataset (Phase 0 safety net)
+data/_backup_STAGE_02_mood_labeled.pkl
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

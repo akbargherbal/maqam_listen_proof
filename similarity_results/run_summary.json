@@ -1,0 +1,54 @@
+{
+  "run_at": "2026-08-25T04:13:04.475928",
+  "backend": "clap",
+  "device": "cuda",
+  "dedupe_takes": false,
+  "n_categories_ok": 4,
+  "n_categories_failed": 0,
+  "categories": [
+    {
+      "category": "hijaz",
+      "status": "ok",
+      "ref": "/content/REF/حجاز_03-مشهد-الذئاب_SONG_B.mp3",
+      "n_songs_in_config": 144,
+      "n_ranked": 144,
+      "n_failed_files": 0,
+      "failures": [],
+      "output_csv": "/content/similarity_results/hijaz_ranking.csv",
+      "error": null
+    },
+    {
+      "category": "ajam",
+      "status": "ok",
+      "ref": "/content/REF/عجم_ليس-الجمال-بمئزر.mp3",
+      "n_songs_in_config": 170,
+      "n_ranked": 170,
+      "n_failed_files": 0,
+      "failures": [],
+      "output_csv": "/content/similarity_results/ajam_ranking.csv",
+      "error": null
+    },
+    {
+      "category": "kurd",
+      "status": "ok",
+      "ref": "/content/REF/كرد_02-تعب-الحياة-ونواح-بنات-الهديل_SONG_B.mp3",
+      "n_songs_in_config": 146,
+      "n_ranked": 146,
+      "n_failed_files": 0,
+      "failures": [],
+      "output_csv": "/content/similarity_results/kurd_ranking.csv",
+      "error": null
+    },
+    {
+      "category": "nahawand",
+      "status": "ok",
+      "ref": "/content/REF/نهاوند_RETAKE_02-وحشة-الاغتراب-ووفاء-السلاح_SONG_B.mp3",
+      "n_songs_in_config": 140,
+      "n_ranked": 140,
+      "n_failed_files": 0,
+      "failures": [],
+      "output_csv": "/content/similarity_results/nahawand_ranking.csv",
+      "error": null
+    }
+  ]
+}
