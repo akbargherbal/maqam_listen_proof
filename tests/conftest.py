@@ -22,11 +22,16 @@ AJAM_FULL_CSV = """rank,filename,similarity,file
 
 
 @pytest.fixture()
-def app_module():
+def app_module(tmp_path, monkeypatch):
     import app as app_mod
 
     importlib.reload(app_mod)
     app_mod.app.config.update(TESTING=True)
+    # Redirect config.json writes to an isolated tmp file so tests never
+    # touch the real repo-root config.json (this previously caused a real
+    # POST /api/settings test to permanently overwrite the developer's
+    # actual folder settings on disk).
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", tmp_path / "config.json")
     yield app_mod
 
 

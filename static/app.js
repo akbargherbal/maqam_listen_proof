@@ -1,4 +1,4 @@
-const state = { current: null, rows: [], full: false, selectedCandidate: null };
+const state = { current: null, rows: [], full: false, selectedCandidate: null, ratedCount: 0 };
 const browseState = { target: null, path: null };
 
 const cap = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
@@ -89,9 +89,24 @@ async function loadMaqam(name, full) {
 
   const data = await fetchJSON(`/api/maqam/${name}?full=${full ? 1 : 0}`);
   state.rows = data.rows;
+  state.ratedCount = data.rated_count || 0;
 
   document.getElementById('maqamHeading').innerHTML = `${cap(name)} <span class="arabic text-2xl">${data.arabic || ''}</span>`;
-  document.getElementById('maqamSub').textContent = `${data.total} tracks catalogued (${full ? 'full ranking' : 'top 50'})`;
+  document.getElementById('maqamSub').textContent =
+    `${data.total} tracks catalogued (${full ? 'full ranking' : 'top 50'}) · ${state.ratedCount} rated`;
+
+  // Mode indicator: quiet tonal shade shift, no new hues, same palette as
+  // hover/active states elsewhere in the app.
+  const modeTag = document.getElementById('modeTag');
+  const comparePanel = document.getElementById('comparePanel');
+  if (modeTag) {
+    modeTag.classList.remove('hidden');
+    modeTag.textContent = full ? 'ALL FILES' : 'TOP 50';
+    modeTag.classList.toggle('full', full);
+  }
+  if (comparePanel) {
+    comparePanel.style.backgroundColor = full ? '#FAF4E6' : '';
+  }
 
   // Reference Column
   document.getElementById('refName').textContent = data.has_ref ? `${data.arabic || name} Reference` : 'No reference audio located';
@@ -105,6 +120,7 @@ async function loadMaqam(name, full) {
   document.getElementById('candNote').textContent = '';
   document.getElementById('candScoreBadge').textContent = '';
   document.getElementById('candPlayerWrap').innerHTML = `<audio controls disabled class="opacity-40"></audio>`;
+  document.getElementById('ratingRow').classList.add('hidden');
 
   // Top50 vs Full Toggle
   const toggleBtn = document.getElementById('toggleFullBtn');
@@ -137,9 +153,122 @@ function selectCandidate(rank) {
     wrap.innerHTML = `<span class="text-xs px-2.5 py-1 rounded-full bg-red-100 text-red-800">File not found in local audio root</span>`;
   }
 
+  // Star rating widget: reflect this candidate's saved rating (if any)
+  const ratingRow = document.getElementById('ratingRow');
+  ratingRow.classList.remove('hidden');
+  paintStars(document.getElementById('candStars'), t.stars || 0);
+
   // Highlight selected row in list
   document.querySelectorAll('.entry-row').forEach(row => {
     row.classList.toggle('active', parseInt(row.dataset.rank, 10) === rank);
+  });
+}
+
+// --------------------------------------------------------------------------
+// Star Ratings
+// --------------------------------------------------------------------------
+function paintStars(container, value) {
+  if (!container) return;
+  container.dataset.rating = value;
+  container.querySelectorAll('.star').forEach(s => {
+    s.classList.toggle('filled', parseInt(s.dataset.val, 10) <= value);
+  });
+}
+
+async function rateCandidate(rank, stars) {
+  const t = state.rows.find(r => r.rank === rank);
+  if (!t) return;
+
+  const wasRated = t.stars != null;
+  const prevStars = t.stars;
+
+  // Optimistic UI update
+  t.stars = stars || null;
+  paintStars(document.getElementById('candStars'), t.stars || 0);
+  updateListRowStars(rank, t.stars || 0);
+  if (!wasRated && t.stars) state.ratedCount += 1;
+  if (wasRated && !t.stars) state.ratedCount -= 1;
+  updateRatedCountDisplay();
+
+  try {
+    await fetchJSON(`/api/maqam/${state.current}/rating`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: t.filename, stars: t.stars }),
+    });
+  } catch (err) {
+    // Revert optimistic update on failure
+    t.stars = prevStars;
+    paintStars(document.getElementById('candStars'), t.stars || 0);
+    updateListRowStars(rank, t.stars || 0);
+    if (!wasRated && stars) state.ratedCount -= 1;
+    if (wasRated && !stars) state.ratedCount += 1;
+    updateRatedCountDisplay();
+    alert('Could not save rating: ' + err.message);
+  }
+}
+
+function updateListRowStars(rank, value) {
+  const row = document.querySelector(`.entry-row[data-rank="${rank}"] .rated-stars`);
+  if (!row) return;
+  row.innerHTML = starsGlyph(value);
+}
+
+function starsGlyph(value) {
+  let html = '';
+  for (let i = 1; i <= 5; i++) {
+    html += i <= value ? '<span class="on">★</span>' : '<span>★</span>';
+  }
+  return html;
+}
+
+function updateRatedCountDisplay() {
+  const sub = document.getElementById('maqamSub');
+  if (!sub) return;
+  const total = state.rows.length;
+  sub.textContent = `${total} tracks catalogued (${state.full ? 'full ranking' : 'top 50'}) · ${state.ratedCount} rated`;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const starsContainer = document.getElementById('candStars');
+  if (starsContainer) {
+    starsContainer.querySelectorAll('.star').forEach(s => {
+      s.addEventListener('mouseenter', () => paintStars(starsContainer, parseInt(s.dataset.val, 10)));
+      s.addEventListener('click', () => {
+        const val = parseInt(s.dataset.val, 10);
+        const current = parseInt(starsContainer.dataset.rating || '0', 10);
+        const next = current === val ? 0 : val; // click same star again -> clear
+        if (state.selectedCandidate != null) rateCandidate(state.selectedCandidate, next);
+      });
+    });
+    starsContainer.addEventListener('mouseleave', () => {
+      paintStars(starsContainer, parseInt(starsContainer.dataset.rating || '0', 10));
+    });
+  }
+
+  const clearBtn = document.getElementById('clearRatingBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      if (state.selectedCandidate != null) rateCandidate(state.selectedCandidate, 0);
+    });
+  }
+
+  const unratedOnly = document.getElementById('unratedOnlyCheckbox');
+  if (unratedOnly) {
+    unratedOnly.addEventListener('change', applyRowFilters);
+  }
+});
+
+function applyRowFilters() {
+  const q = (document.getElementById('filterInput')?.value || '').toLowerCase();
+  const unratedOnly = document.getElementById('unratedOnlyCheckbox')?.checked;
+  document.querySelectorAll('#entryList li').forEach(li => {
+    const filename = li.querySelector('.arabic')?.textContent.toLowerCase() || '';
+    const rank = parseInt(li.dataset.rank, 10);
+    const row = state.rows.find(r => r.rank === rank);
+    const matchesText = filename.includes(q);
+    const matchesRated = !unratedOnly || !(row && row.stars);
+    li.style.display = (matchesText && matchesRated) ? '' : 'none';
   });
 }
 
@@ -153,6 +282,7 @@ function renderEntries(rows) {
   list.innerHTML = rows.map(r => `
     <li class="entry-row cursor-pointer px-4 py-3 hover:bg-[#EDE3CC]/60 transition-colors ${r.found ? '' : 'opacity-50'} ${r.rank === state.selectedCandidate ? 'active' : ''}" data-rank="${r.rank}">
       <div class="flex items-center gap-3">
+        <span class="rated-stars w-14 shrink-0">${starsGlyph(r.stars || 0)}</span>
         <span class="mono text-xs font-bold text-[#7A6F58] w-7 shrink-0">#${r.rank}</span>
         <div class="flex-1 min-w-0">
           <p class="arabic text-sm font-medium truncate">${r.filename}</p>
@@ -172,11 +302,7 @@ function renderEntries(rows) {
 
 document.addEventListener('input', e => {
   if (e.target.id !== 'filterInput') return;
-  const q = e.target.value.toLowerCase();
-  document.querySelectorAll('#entryList li').forEach(li => {
-    const filename = li.querySelector('.arabic')?.textContent.toLowerCase() || '';
-    li.style.display = filename.includes(q) ? '' : 'none';
-  });
+  applyRowFilters();
 });
 
 // --------------------------------------------------------------------------
@@ -341,5 +467,6 @@ async function navigateBrowse(path) {
 export {
   cap, fetchJSON, qualitativeLabel, renderConfigStatus, loadCatalog, loadMaqam,
   selectCandidate, renderEntries, route, statusBadge, openSettings,
-  closeSettings, saveSettings, initSettings, openBrowse, closeBrowse, navigateBrowse
+  closeSettings, saveSettings, initSettings, openBrowse, closeBrowse, navigateBrowse,
+  paintStars, rateCandidate, starsGlyph, applyRowFilters
 };

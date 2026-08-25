@@ -22,6 +22,18 @@
 
     .entry-row.active { background: rgba(43,58,85,0.08); border-left: 3px solid #2B3A55; }
 
+    /* Mode indicator: quiet tonal shade shift, same palette (no new hues) */
+    .mode-tag { font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.08em; padding:2px 7px; border-radius:999px; border:1px solid #E4D9C2; color:#9C9080; background:#F6EFE2; transition:.2s; }
+    .mode-tag.full { color:#2B3A55; border-color:#C9BB9C; background:#EDE3CC; }
+    #comparePanel { transition: background-color .25s; }
+
+    /* Star rating widget */
+    .stars { display:inline-flex; gap:2px; }
+    .stars .star { font-size:19px; line-height:1; cursor:pointer; color:#D8C9A8; transition:.1s; user-select:none; }
+    .stars .star.filled { color:#B8863B; }
+    .rated-stars { font-size:11px; letter-spacing:1px; color:#D8C9A8; }
+    .rated-stars .on { color:#B8863B; }
+
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: #D8C9A8; border-radius: 4px; }
     audio { height: 34px; width: 100%; accent-color: #2B3A55; }
@@ -33,7 +45,10 @@
     <!-- Top Header -->
     <header class="mb-6 flex items-start justify-between gap-4 pb-4 border-b border-[#E4D9C2]">
       <div>
-        <h1 class="display text-2xl sm:text-3xl font-bold tracking-tight">Maqam Study</h1>
+        <div class="flex items-center gap-2.5">
+          <h1 class="display text-2xl sm:text-3xl font-bold tracking-tight">Maqam Study</h1>
+          <span id="modeTag" class="mode-tag hidden"></span>
+        </div>
         <p id="pathInfo" class="text-xs text-[#7A6F58] mono mt-1">loading configuration…</p>
       </div>
       <button id="settingsBtn" title="Configure data folders"
@@ -95,7 +110,7 @@
           </div>
 
           <!-- Compare Panel: Signature Element -->
-          <section class="paper-card rounded-2xl p-5 mb-6 shadow-sm">
+          <section id="comparePanel" class="paper-card rounded-2xl p-5 mb-6 shadow-sm">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               <!-- Reference Track Column -->
@@ -116,8 +131,21 @@
                 </div>
                 <p id="candName" class="arabic text-base sm:text-lg mb-1 font-medium min-h-[1.75rem]">— select an entry below —</p>
                 <p id="candNote" class="text-xs italic text-[#7A6F58] mb-3 h-4"></p>
-                <div id="candPlayerWrap">
+                <div id="candPlayerWrap" class="mb-3">
                   <audio id="candPlayer" controls class="opacity-40" disabled></audio>
+                </div>
+
+                <!-- Star rating: same toolbar weight, directly under the player -->
+                <div id="ratingRow" class="hidden flex items-center gap-3 pt-3 border-t border-dashed border-[#D8C9A8]">
+                  <span class="text-[10px] uppercase tracking-widest text-[#7A6F58] font-bold">Your Rating</span>
+                  <div id="candStars" class="stars">
+                    <span class="star" data-val="1">★</span>
+                    <span class="star" data-val="2">★</span>
+                    <span class="star" data-val="3">★</span>
+                    <span class="star" data-val="4">★</span>
+                    <span class="star" data-val="5">★</span>
+                  </div>
+                  <button id="clearRatingBtn" class="text-[10px] mono text-[#7A6F58] hover:text-[#9C4A3E] ml-auto">clear</button>
                 </div>
               </div>
 
@@ -128,6 +156,9 @@
           <div class="flex items-center gap-3 mb-3 flex-wrap">
             <input id="filterInput" type="text" placeholder="Filter by filename…"
               class="paper-input rounded-lg px-3.5 py-2 text-sm w-72 focus:outline-none focus:ring-1 focus:ring-[#2B3A55]">
+            <label class="text-xs text-[#7A6F58] flex items-center gap-1.5 mono">
+              <input id="unratedOnlyCheckbox" type="checkbox" class="accent-[#2B3A55]"> unrated only
+            </label>
             <span id="rowCount" class="text-xs text-[#7A6F58] mono ml-auto"></span>
           </div>
 

@@ -69,6 +69,92 @@ class TestMaqamDetailEndpoint:
         assert resp.status_code == 404
 
 
+class TestRatingsEndpoint:
+    def test_post_rating_shows_up_in_maqam_detail(self, client):
+        resp = client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "track_a.mp3", "stars": 4}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["stars"] == 4
+
+        detail = client.get("/api/maqam/hijaz").get_json()
+        by_filename = {r["filename"]: r for r in detail["rows"]}
+        assert by_filename["track_a.mp3"]["stars"] == 4
+        assert detail["rated_count"] == 1
+
+    def test_clearing_rating_removes_it(self, client):
+        client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "track_a.mp3", "stars": 3}),
+            content_type="application/json",
+        )
+        resp = client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "track_a.mp3", "stars": None}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["stars"] is None
+
+        detail = client.get("/api/maqam/hijaz").get_json()
+        by_filename = {r["filename"]: r for r in detail["rows"]}
+        assert by_filename["track_a.mp3"]["stars"] is None
+        assert detail["rated_count"] == 0
+
+    def test_out_of_range_stars_rejected(self, client):
+        resp = client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "track_a.mp3", "stars": 6}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+    def test_missing_filename_rejected(self, client):
+        resp = client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"stars": 3}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+    def test_rating_visible_across_top50_and_full_mode(self, client):
+        # track_a.mp3 appears (with the same filename) in both the top50
+        # and full CSVs for hijaz in this fixture -- rating it once should
+        # be visible in both modes, since ratings are keyed by filename.
+        client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "track_a.mp3", "stars": 5}),
+            content_type="application/json",
+        )
+        top50 = client.get("/api/maqam/hijaz?full=0").get_json()
+        full = client.get("/api/maqam/hijaz?full=1").get_json()
+        top50_stars = {r["filename"]: r["stars"] for r in top50["rows"]}
+        full_stars = {r["filename"]: r["stars"] for r in full["rows"]}
+        assert top50_stars["track_a.mp3"] == 5
+        assert full_stars["track_a.mp3"] == 5
+
+    def test_ratings_persist_across_fresh_module_load(self, configured_app, data_dirs):
+        """Simulates restarting the Flask process: a brand-new load_ratings()
+        call (not relying on any in-memory state) must still see the rating
+        that was saved to disk earlier -- this is the actual cross-session
+        persistence guarantee."""
+        client = configured_app.app.test_client()
+        client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "track_b.mp3", "stars": 2}),
+            content_type="application/json",
+        )
+
+        ratings_file = data_dirs["results"] / "ratings" / "hijaz.json"
+        assert ratings_file.exists()
+
+        # Fresh read straight from disk, independent of any app-level cache.
+        on_disk = json.loads(ratings_file.read_text(encoding="utf-8"))
+        assert on_disk["ratings"]["track_b.mp3"]["stars"] == 2
+
+
 class TestAudioStreaming:
     def test_stream_reference_track(self, client):
         resp = client.get("/audio/ref/hijaz")

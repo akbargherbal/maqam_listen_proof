@@ -43,6 +43,7 @@ configured correctly.
 import os
 import json
 import string
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -224,6 +225,62 @@ def load_ranking(maqam: str, full: bool = False):
 
 
 # --------------------------------------------------------------------------
+# Ratings (human review verdicts) -- persisted as JSON, one file per maqam
+# --------------------------------------------------------------------------
+# Keyed by filename (not rank), because the same file's rank differs between
+# the top50 and full-ranking CSVs -- filename is the one stable identifier
+# shared by both, so a rating given in one mode is automatically visible in
+# the other.
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def ratings_path(maqam: str) -> Path:
+    return results_dir() / "ratings" / f"{maqam}.json"
+
+
+def load_ratings(maqam: str) -> dict:
+    """Return {filename: {"stars": int, "rated_at": str}} for a maqam."""
+    p = ratings_path(maqam)
+    if not p.exists():
+        return {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f).get("ratings", {})
+    except Exception as e:
+        print(f"[ratings] Could not parse {p} ({e}); treating as empty.")
+        return {}
+
+
+def save_rating(maqam: str, filename: str, stars):
+    """Set (1-5) or clear (None) a single filename's rating and write to disk."""
+    p = ratings_path(maqam)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    data = {"maqam": maqam, "ratings": {}}
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            pass
+    data.setdefault("ratings", {})
+
+    if stars is None:
+        data["ratings"].pop(filename, None)
+    else:
+        data["ratings"][filename] = {"stars": int(stars), "rated_at": _now_iso()}
+
+    data["maqam"] = maqam
+    data["updated"] = _now_iso()
+
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+# --------------------------------------------------------------------------
 # Page route
 # --------------------------------------------------------------------------
 
@@ -337,16 +394,20 @@ def api_maqam(maqam):
     if df is None:
         abort(404, f"No ranking CSV found for maqam '{maqam}'")
 
+    ratings = load_ratings(maqam)
+
     rows = []
     for _, r in df.iterrows():
         csv_path = str(r.get("file") or r.get("filename") or "")
         local = resolve_audio_file(csv_path)
+        filename = str(r.get("filename", Path(csv_path).name))
         rows.append(
             {
                 "rank": int(r.get("rank")),
-                "filename": str(r.get("filename", Path(csv_path).name)),
+                "filename": filename,
                 "similarity": float(r.get("similarity", 0.0)),
                 "found": local is not None,
+                "stars": ratings.get(filename, {}).get("stars"),
             }
         )
 
@@ -356,9 +417,29 @@ def api_maqam(maqam):
             "arabic": MAQAM_ARABIC.get(maqam, ""),
             "has_ref": resolve_ref_file(maqam) is not None,
             "total": len(rows),
+            "rated_count": len(ratings),
             "rows": rows,
         }
     )
+
+
+@app.route("/api/maqam/<maqam>/rating", methods=["POST"])
+def api_set_rating(maqam):
+    """Set or clear a star rating (1-5, or null/0 to clear) for one filename."""
+    data = request.get_json(force=True, silent=True) or {}
+    filename = data.get("filename")
+    stars = data.get("stars")
+
+    if not filename:
+        abort(400, "filename is required")
+    if stars is not None and stars != 0 and not (1 <= int(stars) <= 5):
+        abort(400, "stars must be an integer 1-5, or null/0 to clear")
+
+    stars = int(stars) if stars else None
+    save_rating(maqam, filename, stars)
+
+    ratings = load_ratings(maqam)
+    return jsonify({"filename": filename, "stars": stars, "rated_count": len(ratings)})
 
 
 @app.route("/refresh-index")
