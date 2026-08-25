@@ -624,7 +624,7 @@
       ]
     }
   },
-  "results_dir": "D:\\MUSIC_GCP_UPLOAD\\listen_proof\\similarity_results",
+  "results_dir": "D:\\MUSIC_GCP_UPLOAD\\similarity_results",
   "audio_root": "D:\\MUSIC_GCP_UPLOAD\\UPLOAD_TO_GCP_11082026",
   "ref_dir": "D:\\MUSIC_GCP_UPLOAD\\REF"
 }

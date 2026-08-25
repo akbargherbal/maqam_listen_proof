@@ -202,9 +202,13 @@ def list_maqams():
     rdir = results_dir()
     if not rdir.exists():
         return []
-    return sorted(
-        f.stem.replace("_ranking", "") for f in rdir.glob("*_ranking.csv")
-    )
+    # Match both full ranking files and top50 files
+    names = set()
+    for f in rdir.glob("*_ranking*.csv"):
+        name = f.stem.replace("_ranking_top50", "").replace("_ranking", "")
+        if name:
+            names.add(name)
+    return sorted(names)
 
 
 def load_ranking(maqam: str, full: bool = False):
@@ -295,16 +299,19 @@ def api_browse():
     drives = None
     if os.name == "nt":
         drives = [
-            f"{letter}:\\" for letter in string.ascii_uppercase
+            f"{letter}:\\"
+            for letter in string.ascii_uppercase
             if os.path.exists(f"{letter}:\\")
         ]
 
-    return jsonify({
-        "path": str(p),
-        "parent": str(p.parent) if p.parent != p else None,
-        "dirs": dirs,
-        "drives": drives,
-    })
+    return jsonify(
+        {
+            "path": str(p),
+            "parent": str(p.parent) if p.parent != p else None,
+            "dirs": dirs,
+            "drives": drives,
+        }
+    )
 
 
 @app.route("/api/maqams")
