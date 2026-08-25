@@ -214,6 +214,11 @@ async function rateCandidate(rank, stars) {
   if (!wasRated && t.stars) state.ratedCount += 1;
   if (wasRated && !t.stars) state.ratedCount -= 1;
   updateRatedCountDisplay();
+  // Re-apply the "unrated only" / text filters to the LIST ONLY. This never
+  // touches candPlayerWrap, so the currently-playing track in the Under
+  // Study player is left completely untouched (no pause/reload/flicker),
+  // even if this same track just got filtered out of the list below.
+  applyRowFilters();
 
   try {
     await fetchJSON(`/api/maqam/${state.current}/rating`, {
@@ -229,6 +234,7 @@ async function rateCandidate(rank, stars) {
     if (!wasRated && stars) state.ratedCount -= 1;
     if (wasRated && !stars) state.ratedCount += 1;
     updateRatedCountDisplay();
+    applyRowFilters();
     alert('Could not save rating: ' + err.message);
   }
 }

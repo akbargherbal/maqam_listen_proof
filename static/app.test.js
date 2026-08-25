@@ -30,8 +30,20 @@ const FIXTURE_HTML = `
       <p id="candName"></p>
       <p id="candNote"></p>
       <div id="candPlayerWrap"></div>
+      <div id="ratingRow" class="hidden">
+        <div id="candStars">
+          <span class="star" data-val="1"></span>
+          <span class="star" data-val="2"></span>
+          <span class="star" data-val="3"></span>
+          <span class="star" data-val="4"></span>
+          <span class="star" data-val="5"></span>
+        </div>
+        <span class="rating-chip"></span>
+      </div>
+      <button id="clearRatingBtn"></button>
 
       <input id="filterInput" type="text">
+      <input id="unratedOnlyCheckbox" type="checkbox">
       <span id="rowCount"></span>
       <ul id="entryList"></ul>
     </div>
@@ -144,6 +156,74 @@ describe('loadCatalog', () => {
     expect(navItems.length).toBe(1);
     expect(navItems[0].textContent).toContain('Hijaz');
     expect(navItems[0].textContent).toContain('حجاز');
+  });
+});
+
+describe('rateCandidate + "unrated only" filter interaction', () => {
+  function mockSequentialFetch(responses) {
+    let call = 0;
+    global.fetch = vi.fn().mockImplementation(() => {
+      const payload = responses[Math.min(call, responses.length - 1)];
+      call += 1;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(payload),
+        text: () => Promise.resolve(JSON.stringify(payload)),
+      });
+    });
+  }
+
+  async function setupLoadedMaqam() {
+    const { loadMaqam } = freshApp();
+    mockSequentialFetch([
+      { maqams: [{ name: 'hijaz', arabic: 'حجاز', count: 2, has_ref: true }],
+        config: { results_dir: '/r', audio_root: '/a', ref_dir: '/f', is_configured: true } },
+      { arabic: 'حجاز', total: 2, has_ref: true, rated_count: 0,
+        rows: [
+          { rank: 1, filename: 'track_one.mp3', similarity: 0.91, found: true, stars: null },
+          { rank: 2, filename: 'track_two.mp3', similarity: 0.85, found: true, stars: null },
+        ] },
+    ]);
+    await loadMaqam('hijaz', false);
+  }
+
+  it('removes a newly-rated track from the list instantly when "unrated only" is on', async () => {
+    await setupLoadedMaqam();
+    const { rateCandidate } = app;
+    document.getElementById('unratedOnlyCheckbox').checked = true;
+
+    // rateCandidate posts to the rating endpoint; mock that call too.
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ok: true }),
+      text: () => Promise.resolve('{}'),
+    });
+
+    const row1 = document.querySelector('.entry-row[data-rank="1"]');
+    expect(row1.style.display).not.toBe('none');
+
+    await rateCandidate(1, 4);
+
+    expect(row1.style.display).toBe('none');
+  });
+
+  it('never touches the candidate player when a track is rated', async () => {
+    await setupLoadedMaqam();
+    const { rateCandidate } = app;
+    document.getElementById('unratedOnlyCheckbox').checked = true;
+
+    const playerWrap = document.getElementById('candPlayerWrap');
+    const playerHtmlBefore = playerWrap.innerHTML;
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ok: true }),
+      text: () => Promise.resolve('{}'),
+    });
+
+    await rateCandidate(1, 5);
+
+    expect(playerWrap.innerHTML).toBe(playerHtmlBefore);
   });
 });
 
