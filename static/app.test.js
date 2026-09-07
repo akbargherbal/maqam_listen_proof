@@ -7,6 +7,8 @@ const FIXTURE_HTML = `
   <header>
     <p id="pathInfo"></p>
     <button id="settingsBtn"></button>
+    <a id="brandHome" href="#/"></a>
+    <button id="homeBtn"></button>
   </header>
   <div id="setupNotice" class="hidden">
     <button id="setupOpenSettings"></button>
@@ -15,11 +17,18 @@ const FIXTURE_HTML = `
   <div id="maqamCountTotal"></div>
   <nav id="maqamNav"></nav>
 
+  <aside>
+    <div id="filterPanelWrap" class="hidden">
+      <button id="filterResetBtn"></button>
+    </div>
+  </aside>
+
   <div id="studyWorkspace">
     <div id="emptyWorkspace" class="hidden"></div>
     <div id="activeWorkspace" class="hidden">
       <h2 id="maqamHeading"></h2>
       <p id="maqamSub"></p>
+      <button id="allMaqamsBtn"></button>
       <button id="toggleFullBtn"></button>
       
       <span id="refBadge"></span>
@@ -117,6 +126,7 @@ function mockFetchOnce(payload, ok = true) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  window.history.replaceState(null, '', '#/');
 });
 
 describe('cap & qualitativeLabel', () => {
@@ -373,6 +383,46 @@ describe('Filter & Sort controls', () => {
     app.resetFilters();
     expect(visibleRanks()).toEqual([1, 2, 3]);
     expect(document.getElementById('rowCount').textContent).toBe('Showing 3 of 3');
+  });
+});
+
+describe('navigation & study-mode chrome', () => {
+  const CONFIG = { results_dir: '/r', audio_root: '/a', ref_dir: '/f', is_configured: true };
+  const CATALOG = { maqams: [{ name: 'hijaz', arabic: 'حجاز', count: 2, has_ref: true }], config: CONFIG };
+  const DETAIL = { arabic: 'حجاز', total: 2, has_ref: true, rated_count: 0, rows: [
+    { rank: 1, filename: 'a.mp3', similarity: 0.9, found: true, stars: null },
+    { rank: 2, filename: 'b.mp3', similarity: 0.8, found: true, stars: null },
+  ] };
+
+  function mockRouteFetch(payloads) {
+    let call = 0;
+    global.fetch = vi.fn().mockImplementation(() => {
+      const p = payloads[Math.min(call, payloads.length - 1)];
+      call += 1;
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(p), text: () => Promise.resolve(JSON.stringify(p)) });
+    });
+  }
+
+  it('hides Filter & Sort and Home chrome on the home page', async () => {
+    const { route } = freshApp();
+    window.history.replaceState(null, '', '#/');
+    mockRouteFetch([CATALOG]);
+    await route();
+    expect(document.getElementById('filterPanelWrap').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('homeBtn').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('activeWorkspace').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('emptyWorkspace').classList.contains('hidden')).toBe(false);
+  });
+
+  it('shows Filter & Sort and Home chrome inside a maqam', async () => {
+    const { route } = freshApp();
+    window.history.replaceState(null, '', '#/maqam/hijaz');
+    mockRouteFetch([CATALOG, DETAIL]);
+    await route();
+    expect(document.getElementById('filterPanelWrap').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('homeBtn').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('activeWorkspace').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('emptyWorkspace').classList.contains('hidden')).toBe(true);
   });
 });
 

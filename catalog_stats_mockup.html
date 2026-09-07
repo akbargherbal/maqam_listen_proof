@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mockup — Catalog Stats Dashboard (Maqam Study)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Source+Serif+4:wght@400;600&family=Amiri&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Source Serif 4', Georgia, serif; background: #F6EFE2; color: #2B3A55; }
+    .display { font-family: 'Fraunces', serif; }
+    .arabic { font-family: 'Amiri', serif; direction: rtl; unicode-bidi: plaintext; }
+    .mono { font-family: 'Space Mono', monospace; }
+    .paper-card { background: #FFFDF8; border: 1px solid #E4D9C2; }
+    .divider { border-top: 1px dashed #C9BB9C; }
+    .proposed-tag { font-family:'Space Mono',monospace; font-size:9px; letter-spacing:.14em; padding:2px 7px; border-radius:999px; background:#9C4A3E; color:#FFF7EC; }
+    .kpi-num { font-family:'Fraunces',serif; }
+    .mini-label { font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.1em; color:#7A6F58; font-weight:700; }
+    .maqam-card { transition:.15s; }
+    .maqam-card:hover { border-color:#B8863B; box-shadow: 0 2px 10px rgba(43,58,85,.08); }
+    .bar { height:8px; border-radius:999px; background:#EDE3CC; overflow:hidden; }
+    .bar > i { display:block; height:100%; border-radius:999px; background:#B8863B; }
+    .starhist { display:grid; grid-template-columns: 22px 1fr 26px; gap:8px; align-items:center; }
+    ::-webkit-scrollbar { width:8px; height:8px; }
+    ::-webkit-scrollbar-thumb { background:#D8C9A8; border-radius:4px; }
+  </style>
+</head>
+<body class="min-h-screen p-4 sm:p-6 lg:p-8">
+  <div class="max-w-7xl mx-auto">
+
+    <!-- Mockup notice -->
+    <div class="mb-5 paper-card rounded-xl px-4 py-3 flex items-start justify-between gap-3" style="background:#FAF1DC;border-color:#E0C890;">
+      <div>
+        <p class="display text-sm font-bold" style="color:#8A6A1F;">Static mockup — catalog stats &amp; homepage</p>
+        <p class="text-xs mt-0.5" style="color:#8A6A1F;">
+          Proposed front (home) page: it replaces the plain “Select a Maqam” empty state with per-maqam listening stats.
+          The Filter &amp; Sort panel is <b>not shown here</b> — it only appears once a maqam is open (already implemented). Numbers are invented sample data.
+        </p>
+      </div>
+      <span class="proposed-tag shrink-0">PROPOSED</span>
+    </div>
+
+    <!-- Top Header -->
+    <header class="mb-6 flex items-start justify-between gap-4 pb-4 border-b border-[#E4D9C2]">
+      <div>
+        <a href="#" class="display text-2xl sm:text-3xl font-bold tracking-tight hover:opacity-70 transition-opacity" title="Home / catalog">Maqam Study</a>
+        <p class="text-xs text-[#7A6F58] mono mt-1">similarity_results | UPLOAD_TO_GCP_11082026 | REF | indexed: 9,412</p>
+      </div>
+      <button class="shrink-0 text-xs sm:text-sm px-3.5 py-2 rounded-lg paper-card hover:bg-[#EDE3CC] transition-colors flex items-center gap-2 font-medium" disabled>
+        ⚙️ <span class="hidden sm:inline">Folder Settings</span>
+      </button>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6">
+
+      <!-- Left sidebar: catalog ONLY on home (no Filter & Sort) -->
+      <aside>
+        <div class="mb-3 flex items-baseline justify-between">
+          <p class="text-xs uppercase tracking-widest text-[#7A6F58] font-semibold">Catalog</p>
+          <span class="text-xs text-[#7A6F58] mono">4 maqams</span>
+        </div>
+        <nav class="space-y-1.5" id="catalogNav"></nav>
+        <p class="mt-3 text-[10px] italic text-[#B4A98F]">Filter &amp; Sort appear only inside a maqam.</p>
+      </aside>
+
+      <!-- Right: Stats dashboard -->
+      <main>
+        <!-- Breadcrumb-ish header -->
+        <div class="flex items-baseline justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <h2 class="display text-2xl sm:text-3xl font-bold">Review Progress</h2>
+            <p class="text-xs text-[#7A6F58] mt-1">All maqams · ratings across every candidate you've listened to</p>
+          </div>
+          <span class="mode-tag mono text-[10px] px-2.5 py-1 rounded-full" style="background:#EDE3CC;color:#2B3A55;border:1px solid #C9BB9C;">LIVE OVERVIEW</span>
+        </div>
+
+        <!-- Overall KPI cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div class="paper-card rounded-2xl p-4">
+            <p class="mini-label">CANDIDATES</p>
+            <p class="kpi-num text-3xl font-bold mt-1">600</p>
+            <p class="text-[11px] text-[#7A6F58] mt-0.5">sum of 4 rankings</p>
+          </div>
+          <div class="paper-card rounded-2xl p-4">
+            <p class="mini-label">RATED</p>
+            <p class="kpi-num text-3xl font-bold mt-1">279</p>
+            <p class="text-[11px] text-[#7A6F58] mt-0.5">tracks with 1–5★</p>
+          </div>
+          <div class="paper-card rounded-2xl p-4">
+            <p class="mini-label">COMPLETED</p>
+            <p class="kpi-num text-3xl font-bold mt-1" style="color:#B8863B;">46.5%</p>
+            <div class="bar mt-2"><i style="width:46.5%"></i></div>
+          </div>
+          <div class="paper-card rounded-2xl p-4">
+            <p class="mini-label">AVG RATING</p>
+            <p class="kpi-num text-3xl font-bold mt-1">3.8<span class="text-base text-[#B8863B]">★</span></p>
+            <p class="text-[11px] text-[#7A6F58] mt-0.5">across rated tracks</p>
+          </div>
+        </div>
+
+        <!-- Overall star histogram -->
+        <section class="paper-card rounded-2xl p-5 mb-6">
+          <div class="flex items-center justify-between mb-3">
+            <p class="mini-label">STAR DISTRIBUTION · ALL MAQAMS</p>
+            <span class="text-[10px] mono text-[#7A6F58]">rated: 279 · unrated: 321</span>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-6 items-center">
+            <div class="space-y-1.5">
+              <div class="starhist"><span class="mono text-xs">★★★★★</span><div class="bar"><i style="width:99%"></i></div><span class="mono text-xs text-right">99</span></div>
+              <div class="starhist"><span class="mono text-xs text-[#B8863B]">★★★★</span><div class="bar"><i style="width:78%"></i></div><span class="mono text-xs text-right">78</span></div>
+              <div class="starhist"><span class="mono text-xs text-[#B8863B]">★★★</span><div class="bar"><i style="width:55%"></i></div><span class="mono text-xs text-right">55</span></div>
+              <div class="starhist"><span class="mono text-xs text-[#B8863B]">★★</span><div class="bar"><i style="width:29%"></i></div><span class="mono text-xs text-right">29</span></div>
+              <div class="starhist"><span class="mono text-xs text-[#B8863B]">★</span><div class="bar"><i style="width:18%"></i></div><span class="mono text-xs text-right">18</span></div>
+            </div>
+            <div class="paper-card rounded-xl p-4" style="background:#F6EFE2;">
+              <p class="text-[11px] text-[#7A6F58] mb-1">Most-listened verdicts are 4–5★. If you're mostly rating high, check whether your reference clips or candidate sets are skewed.</p>
+              <p class="text-[11px] text-[#7A6F58] mt-2">Ratings come from <span class="mono">ratings/&lt;maqam&gt;.json</span>.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Per-maqam table -->
+        <p class="mini-label mb-3">PER MAQAM</p>
+        <div class="space-y-3">
+          <div class="maqam-card paper-card rounded-2xl p-4 cursor-pointer" onclick="alert('Mockup: open hijaz')">
+            <div class="flex items-center gap-3">
+              <div class="flex-1 min-w-[120px]">
+                <div class="flex items-center gap-2">
+                  <span class="display font-bold text-lg">Hijaz</span>
+                  <span class="arabic text-lg text-[#7A6F58]">حجاز</span>
+                  <span class="avail-dot inline-block w-2 h-2 rounded-full" style="background:#B8863B;" title="reference audio found"></span>
+                </div>
+                <p class="text-[11px] text-[#7A6F58]">144 candidates · 96 rated · 48 left</p>
+                <div class="bar mt-1.5" style="max-width:260px;"><i style="width:66.7%"></i></div>
+              </div>
+              <div class="hidden md:block w-52 shrink-0">
+                <div class="space-y-0.5">
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">5</span><div class="bar" style="height:5px;"><i style="width:99%"></i></div><span class="mono text-[10px] text-right">31</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">4</span><div class="bar" style="height:5px;"><i style="width:90%"></i></div><span class="mono text-[10px] text-right">28</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">3</span><div class="bar" style="height:5px;"><i style="width:71%"></i></div><span class="mono text-[10px] text-right">22</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">2</span><div class="bar" style="height:5px;"><i style="width:29%"></i></div><span class="mono text-[10px] text-right">9</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">1</span><div class="bar" style="height:5px;"><i style="width:19%"></i></div><span class="mono text-[10px] text-right">6</span></div>
+                </div>
+              </div>
+              <div class="text-right shrink-0">
+                <p class="kpi-num text-2xl font-bold">3.9<span class="text-sm">★</span></p>
+                <p class="text-[10px] mono text-[#7A6F58]">avg rating</p>
+              </div>
+              <span class="text-xs px-3 py-1.5 rounded-lg bg-[#2B3A55] text-[#F6EFE2] font-medium">Review →</span>
+            </div>
+          </div>
+
+          <div class="maqam-card paper-card rounded-2xl p-4 cursor-pointer" onclick="alert('Mockup: open ajam')">
+            <div class="flex items-center gap-3">
+              <div class="flex-1 min-w-[120px]">
+                <div class="flex items-center gap-2">
+                  <span class="display font-bold text-lg">Ajam</span>
+                  <span class="arabic text-lg text-[#7A6F58]">عجم</span>
+                  <span class="avail-dot inline-block w-2 h-2 rounded-full" style="background:#B8863B;" title="reference audio found"></span>
+                </div>
+                <p class="text-[11px] text-[#7A6F58]">170 candidates · 122 rated · 48 left</p>
+                <div class="bar mt-1.5" style="max-width:260px;"><i style="width:71.8%"></i></div>
+              </div>
+              <div class="hidden md:block w-52 shrink-0">
+                <div class="space-y-0.5">
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">5</span><div class="bar" style="height:5px;"><i style="width:99%"></i></div><span class="mono text-[10px] text-right">57</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">4</span><div class="bar" style="height:5px;"><i style="width:63%"></i></div><span class="mono text-[10px] text-right">36</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">3</span><div class="bar" style="height:5px;"><i style="width:32%"></i></div><span class="mono text-[10px] text-right">18</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">2</span><div class="bar" style="height:5px;"><i style="width:14%"></i></div><span class="mono text-[10px] text-right">8</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">1</span><div class="bar" style="height:5px;"><i style="width:5%"></i></div><span class="mono text-[10px] text-right">3</span></div>
+                </div>
+              </div>
+              <div class="text-right shrink-0">
+                <p class="kpi-num text-2xl font-bold">4.2<span class="text-sm">★</span></p>
+                <p class="text-[10px] mono text-[#7A6F58]">avg rating</p>
+              </div>
+              <span class="text-xs px-3 py-1.5 rounded-lg bg-[#2B3A55] text-[#F6EFE2] font-medium">Review →</span>
+            </div>
+          </div>
+
+          <div class="maqam-card paper-card rounded-2xl p-4 cursor-pointer" onclick="alert('Mockup: open kurd')">
+            <div class="flex items-center gap-3">
+              <div class="flex-1 min-w-[120px]">
+                <div class="flex items-center gap-2">
+                  <span class="display font-bold text-lg">Kurd</span>
+                  <span class="arabic text-lg text-[#7A6F58]">كرد</span>
+                  <span class="avail-dot inline-block w-2 h-2 rounded-full" style="background:#B8863B;" title="reference audio found"></span>
+                </div>
+                <p class="text-[11px] text-[#7A6F58]">146 candidates · 61 rated · 85 left</p>
+                <div class="bar mt-1.5" style="max-width:260px;"><i style="width:41.8%"></i></div>
+              </div>
+              <div class="hidden md:block w-52 shrink-0">
+                <div class="space-y-0.5">
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">5</span><div class="bar" style="height:5px;"><i style="width:73%"></i></div><span class="mono text-[10px] text-right">11</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">4</span><div class="bar" style="height:5px;"><i style="width:93%"></i></div><span class="mono text-[10px] text-right">14</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">3</span><div class="bar" style="height:5px;"><i style="width:100%"></i></div><span class="mono text-[10px] text-right">15</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">2</span><div class="bar" style="height:5px;"><i style="width:80%"></i></div><span class="mono text-[10px] text-right">12</span></div>
+                  <div class="starhist" style="grid-template-columns:14px 1fr 22px;"><span class="mono text-[10px]">1</span><div class="bar" style="height:5px;"><i style="width:60%"></i></div><span class="mono text-[10px] text-right">9</span></div>
+                </div>
+              </div>
+              <div class="text-right shrink-0">
+                <p class="kpi-num text-2xl font-bold">3.1<span class="text-sm">★</span></p>
+                <p class="text-[10px] mono text-[#7A6F58]">avg rating</p>
+              </div>
+              <span class="text-xs px-3 py-1.5 rounded-lg bg-[#2B3A55] text-[#F6EFE2] font-medium">Review →</span>
+            </div>
+          </div>
+
+          <div class="maqam-card paper-card rounded-2xl p-4 cursor-pointer" onclick="alert('Mockup: open nahawand')">
+            <div class="flex items-center gap-3">
+              <div class="flex-1 min-w-[120px]">
+                <div class="flex items-center gap-2">
+                  <span class="display font-bold text-lg">Nahawand</span>
+                  <span class="arabic text-lg text-[#7A6F58]">نهاوند</span>
+                  <span class="avail-dot inline-block w-2 h-2 rounded-full" style="background:#E4A0A0;" title="no reference audio located"></span>
+                </div>
+                <p class="text-[11px] text-[#7A6F58]">140 candidates · 0 rated · 140 left</p>
+                <div class="bar mt-1.5" style="max-width:260px;"><i style="width:0%"></i></div>
+              </div>
+              <div class="hidden md:block w-52 shrink-0">
+                <p class="text-[11px] italic text-[#B4A98F] py-2">No ratings yet — this maqam has no reference audio, so candidates can't be compared. Add a reference file to start reviewing.</p>
+              </div>
+              <div class="text-right shrink-0">
+                <p class="kpi-num text-2xl font-bold" style="color:#C9BB9C;">—</p>
+                <p class="text-[10px] mono text-[#7A6F58]">avg rating</p>
+              </div>
+              <span class="text-xs px-3 py-1.5 rounded-lg bg-[#2B3A55] text-[#F6EFE2] font-medium opacity-60" title="No reference to compare">Review →</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="text-[11px] italic text-[#7A6F58] mt-3">
+          Mock data only. Suggested backend shape: extend <span class="mono">/api/maqams</span> (or add
+          <span class="mono">/api/stats</span>) to return <span class="mono">total</span>, <span class="mono">rated</span>,
+          <span class="mono">unrated</span>, <span class="mono">avg_stars</span>, and a <span class="mono">stars: {1..5}</span> histogram per maqam.
+        </p>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const CATALOG = [
+      { name: 'Hijaz', arabic: 'حجاز', count: 144, ref: true },
+      { name: 'Ajam', arabic: 'عجم', count: 170, ref: true },
+      { name: 'Kurd', arabic: 'كرد', count: 146, ref: true },
+      { name: 'Nahawand', arabic: 'نهاوند', count: 140, ref: false },
+    ];
+    document.getElementById('catalogNav').innerHTML = CATALOG.map(m => `
+      <a class="maqam-nav-item block px-3 py-2 rounded-xl text-sm transition-colors paper-card hover:bg-[#EDE3CC] cursor-pointer" onclick="alert('Mockup: open ${m.name}')">
+        <div class="flex items-center justify-between">
+          <span class="font-semibold">${m.name}</span>
+          <span class="arabic text-base">${m.arabic}</span>
+        </div>
+        <div class="flex items-center justify-between text-xs mt-1" style="color:#7A6F58;">
+          <span>${m.count} candidates</span>
+          <span style="color:${m.ref ? '#047857' : '#b91c1c'}">${m.ref ? '● ref' : '○ no ref'}</span>
+        </div>
+      </a>`).join('');
+  </script>
+</body>
+</html>

@@ -141,6 +141,7 @@ async function loadMaqam(name, full) {
   state.current = name;
   state.full = full;
   state.selectedCandidate = null;
+  setStudyMode(true);
 
   await loadCatalog();
 
@@ -580,6 +581,7 @@ function bindFilterControls() {
 }
 
 bindFilterControls();
+initNavigation();
 
 function renderEntries(rows) {
   const list = document.getElementById('entryList');
@@ -610,10 +612,34 @@ function renderEntries(rows) {
 // --------------------------------------------------------------------------
 // Routing
 // --------------------------------------------------------------------------
+// Show/hide study-mode chrome: the Filter & Sort panel and Home button only
+// belong to the per-maqam workspace, never to the catalog/home page.
+function setStudyMode(active) {
+  const wrap = document.getElementById('filterPanelWrap');
+  if (wrap) wrap.classList.toggle('hidden', !active);
+  const homeBtn = document.getElementById('homeBtn');
+  if (homeBtn) homeBtn.classList.toggle('hidden', !active);
+}
+
+function initNavigation() {
+  const goHome = e => {
+    if (e) e.preventDefault();
+    const hash = location.hash.replace(/^#\//, '');
+    if (hash) location.hash = '#/';
+  };
+  const brand = document.getElementById('brandHome');
+  if (brand) brand.addEventListener('click', goHome);
+  const homeBtn = document.getElementById('homeBtn');
+  if (homeBtn) homeBtn.addEventListener('click', goHome);
+  const allBtn = document.getElementById('allMaqamsBtn');
+  if (allBtn) allBtn.addEventListener('click', goHome);
+}
+
 async function route() {
   const hash = location.hash.replace(/^#\//, '');
   if (!hash) {
     state.current = null;
+    setStudyMode(false);
     await loadCatalog();
     const activeView = document.getElementById('activeWorkspace');
     const emptyView = document.getElementById('emptyWorkspace');
@@ -769,5 +795,5 @@ export {
   selectCandidate, renderEntries, route, statusBadge, openSettings,
   closeSettings, saveSettings, initSettings, openBrowse, closeBrowse, navigateBrowse,
   paintStars, rateCandidate, starsGlyph, applyRowFilters, applyFilters, resetFilters,
-  getFilteredSortedRows, matchesFilters, simBandOf
+  getFilteredSortedRows, matchesFilters, simBandOf, setStudyMode, initNavigation
 };
