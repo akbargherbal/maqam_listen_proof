@@ -1,6 +1,68 @@
 const state = { current: null, rows: [], full: false, selectedCandidate: null, ratedCount: 0 };
 const browseState = { target: null, path: null };
 
+// --------------------------------------------------------------------------
+// Filter & Sort state
+// --------------------------------------------------------------------------
+const DEFAULT_FILTERS = {
+  q: '',               // lowercase filename search
+  ratingStatus: 'any', // any | rated | unrated
+  minStars: 0,         // 0 = any
+  simBands: [],        // selected resemblance band ids
+  avail: 'all',        // all | playable | missing
+  sortKey: 'rank',     // rank | sim | stars | name
+  sortAsc: true,       // rank/name default asc; sim/stars default desc
+};
+state.filters = { ...DEFAULT_FILTERS };
+
+const SIM_BANDS = [
+  { id: 'vc', label: 'Very close', min: 0.870, max: 1.001 },
+  { id: 'cl', label: 'Close', min: 0.840, max: 0.870 },
+  { id: 'mo', label: 'Moderate', min: 0.800, max: 0.840 },
+  { id: 'di', label: 'Distant', min: 0.000, max: 0.800 },
+];
+const NATURAL_SORT_ASC = { rank: true, sim: false, stars: false, name: true };
+
+function simBandOf(score) {
+  return SIM_BANDS.find(b => score >= b.min && score < b.max)?.id || 'di';
+}
+function bandCount(id) {
+  return state.rows.filter(r => simBandOf(r.similarity) === id).length;
+}
+
+function matchesFilters(r) {
+  const f = state.filters;
+  if (f.q && !r.filename.toLowerCase().includes(f.q)) return false;
+  if (f.ratingStatus === 'rated' && !r.stars) return false;
+  if (f.ratingStatus === 'unrated' && r.stars) return false;
+  if (f.minStars && (!r.stars || r.stars < f.minStars)) return false;
+  if (f.simBands.length && !f.simBands.includes(simBandOf(r.similarity))) return false;
+  if (f.avail === 'playable' && !r.found) return false;
+  if (f.avail === 'missing' && r.found) return false;
+  return true;
+}
+
+function compareRows(a, b) {
+  const f = state.filters;
+  const dir = f.sortAsc ? 1 : -1;
+  switch (f.sortKey) {
+    case 'rank': return a.rank - b.rank;
+    case 'sim':  return (a.similarity - b.similarity) * dir;
+    case 'stars': {
+      if (a.stars && b.stars) return (a.stars - b.stars) * dir;
+      if (a.stars) return -1; // rated rows always above unrated
+      if (b.stars) return 1;
+      return a.rank - b.rank;
+    }
+    case 'name': return a.filename.localeCompare(b.filename) * dir;
+    default: return a.rank - b.rank;
+  }
+}
+
+function getFilteredSortedRows() {
+  return state.rows.filter(matchesFilters).sort(compareRows);
+}
+
 const cap = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
 async function fetchJSON(url, opts) {
@@ -129,12 +191,11 @@ async function loadMaqam(name, full) {
     location.hash = `#/maqam/${name}${full ? '' : '/full'}`;
   };
 
-  renderEntries(data.rows);
-
-  // Auto-select #1 track if available
-  if (data.rows.length > 0) {
-    selectCandidate(data.rows[0].rank);
-  }
+  // Rebuild list from scratch with default filters, then auto-select the
+  // top row of the (default-sorted) visible set.
+  resetFilters();
+  const first = getFilteredSortedRows()[0];
+  if (first) selectCandidate(first.rank);
 }
 
 function selectCandidate(rank) {
@@ -214,11 +275,12 @@ async function rateCandidate(rank, stars) {
   if (!wasRated && t.stars) state.ratedCount += 1;
   if (wasRated && !t.stars) state.ratedCount -= 1;
   updateRatedCountDisplay();
-  // Re-apply the "unrated only" / text filters to the LIST ONLY. This never
-  // touches candPlayerWrap, so the currently-playing track in the Under
-  // Study player is left completely untouched (no pause/reload/flicker),
-  // even if this same track just got filtered out of the list below.
+  // Re-apply the current filters to the LIST ONLY. This never touches
+  // candPlayerWrap, so the currently-playing track in the Under Study
+  // player is left completely untouched (no pause/reload/flicker), even if
+  // this same track just got filtered out of the list below.
   applyRowFilters();
+  reflowIfRatingSort();
 
   try {
     await fetchJSON(`/api/maqam/${state.current}/rating`, {
@@ -235,6 +297,7 @@ async function rateCandidate(rank, stars) {
     if (wasRated && !stars) state.ratedCount += 1;
     updateRatedCountDisplay();
     applyRowFilters();
+    reflowIfRatingSort();
     alert('Could not save rating: ' + err.message);
   }
 }
@@ -295,30 +358,230 @@ document.addEventListener('DOMContentLoaded', () => {
       if (state.selectedCandidate != null) rateCandidate(state.selectedCandidate, 0);
     });
   }
-
-  const unratedOnly = document.getElementById('unratedOnlyCheckbox');
-  if (unratedOnly) {
-    unratedOnly.addEventListener('change', applyRowFilters);
-  }
 });
 
+// --------------------------------------------------------------------------
+// Filter & Sort pipeline
+// --------------------------------------------------------------------------
+// Hide/show existing list rows based on current filters. Unlike a full
+// re-render, this never touches candPlayerWrap, so the currently-playing
+// "under study" track is not paused/reloaded even if it gets filtered out.
 function applyRowFilters() {
-  const q = (document.getElementById('filterInput')?.value || '').toLowerCase();
-  const unratedOnly = document.getElementById('unratedOnlyCheckbox')?.checked;
   document.querySelectorAll('#entryList li').forEach(li => {
-    const filename = li.querySelector('.arabic')?.textContent.toLowerCase() || '';
     const rank = parseInt(li.dataset.rank, 10);
     const row = state.rows.find(r => r.rank === rank);
-    const matchesText = filename.includes(q);
-    const matchesRated = !unratedOnly || !(row && row.stars);
-    li.style.display = (matchesText && matchesRated) ? '' : 'none';
+    const show = row ? matchesFilters(row) : false;
+    li.style.display = show ? '' : 'none';
   });
+  refreshSummary();
 }
 
-function renderEntries(rows) {
-  const rowCount = document.getElementById('rowCount');
-  if (rowCount) rowCount.textContent = `${rows.length} rows`;
+// When the list is being reviewed "by my rating", a just-saved rating should
+// reorder the list live; for other sort keys the row is merely hidden/shown.
+function reflowIfRatingSort() {
+  if (state.filters.sortKey === 'stars') renderFilteredList();
+}
 
+// Full rebuild of the list in sorted order (used on sort change, search,
+// control changes, and maqam load). Selection is preserved by rank.
+function renderFilteredList() {
+  renderEntries(getFilteredSortedRows());
+  refreshSummary();
+}
+
+function refreshSummary() {
+  const total = state.rows.length;
+  const shown = state.rows.filter(matchesFilters).length;
+  const rowCount = document.getElementById('rowCount');
+  if (rowCount) rowCount.textContent = `Showing ${shown} of ${total}`;
+  renderActiveChips();
+}
+
+function renderActiveChips() {
+  const box = document.getElementById('activeChips');
+  if (!box) return;
+  const f = state.filters;
+  const chips = [];
+  if (f.q) chips.push(removeChip('search', `“${f.q}”`));
+  if (f.ratingStatus === 'rated') chips.push(removeChip('ratingStatus', 'Rated'));
+  if (f.ratingStatus === 'unrated') chips.push(removeChip('ratingStatus', 'Unrated'));
+  if (f.minStars) chips.push(removeChip('minStars', `★${f.minStars}+`));
+  f.simBands.forEach(id => {
+    const b = SIM_BANDS.find(x => x.id === id);
+    if (b) chips.push(removeChip('simBands', b.label));
+  });
+  if (f.avail === 'playable') chips.push(removeChip('avail', 'Available'));
+  if (f.avail === 'missing') chips.push(removeChip('avail', 'Missing'));
+  const dirGlyph = f.sortAsc ? '▲ asc' : '▼ desc';
+  chips.push(`<span class="text-[11px] mono text-[#B4A98F]">sorted by ${f.sortKey}${f.sortKey === 'rank' ? '' : ' ' + dirGlyph}</span>`);
+  box.innerHTML = chips.length ? chips.join('') : '';
+}
+
+function removeChip(key, label) {
+  return `<button class="chip on" data-remove="${key}" title="Remove filter">✕ ${label}</button>`;
+}
+
+// Apply a patch to state.filters, sync the control widgets, rebuild the list.
+function applyFilters(patch) {
+  Object.assign(state.filters, patch);
+  // Switching sort key adopts that key's natural direction unless the caller
+  // explicitly provides one (rank asc; score & rating desc; name asc).
+  if (patch.sortKey && patch.sortAsc === undefined) {
+    state.filters.sortAsc = NATURAL_SORT_ASC[patch.sortKey];
+  }
+  syncFilterControls();
+  renderFilteredList();
+}
+
+function resetFilters() {
+  state.filters = { ...DEFAULT_FILTERS };
+  const input = document.getElementById('filterInput');
+  if (input) input.value = '';
+  syncFilterControls();
+  renderFilteredList();
+}
+
+// Reflect state.filters back onto the sidebar controls (segmented buttons,
+// star row, band checkboxes, direction label, min-star label).
+function syncFilterControls() {
+  const f = state.filters;
+  setSeg('ratingStatusSeg', f.ratingStatus);
+  setSeg('availSeg', f.avail);
+  setSeg('sortSeg', f.sortKey);
+
+  const minLabel = document.getElementById('minStarsLabel');
+  if (minLabel) minLabel.textContent = f.minStars ? `★${f.minStars}` : 'any';
+  document.querySelectorAll('#minStarsRow .star-min').forEach(s =>
+    s.classList.toggle('on', parseInt(s.dataset.n, 10) <= f.minStars));
+
+  renderBandButtons();
+  syncDirBtn();
+}
+
+function setSeg(segId, val) {
+  const seg = document.getElementById(segId);
+  if (!seg) return;
+  seg.querySelectorAll('.seg-btn').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === val));
+}
+
+function syncDirBtn() {
+  const btn = document.getElementById('sortDirBtn');
+  if (!btn) return;
+  const f = state.filters;
+  if (f.sortKey === 'rank') {
+    btn.textContent = 'rank ▲ fixed';
+    btn.style.opacity = '.5';
+    btn.title = 'Rank is always ascending';
+    return;
+  }
+  btn.style.opacity = '1';
+  btn.textContent = f.sortAsc ? '▲ asc' : '▼ desc';
+  btn.title = 'Toggle direction';
+}
+
+function renderBandButtons() {
+  const box = document.getElementById('simBands');
+  if (!box) return;
+  box.innerHTML = SIM_BANDS.map(b => `
+    <label class="band-row">
+      <input type="checkbox" data-band="${b.id}" class="band-cb" ${state.filters.simBands.includes(b.id) ? 'checked' : ''}>
+      <span>${b.label}</span>
+      <span class="band-count">${bandCount(b.id)} · ≥${b.min.toFixed(3)}</span>
+    </label>`).join('');
+}
+
+function bindFilterControls() {
+  const on = (id, fn) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', fn);
+  };
+
+  const input = document.getElementById('filterInput');
+  if (input) {
+    input.addEventListener('input', e => applyFilters({ q: e.target.value.trim().toLowerCase() }));
+  }
+
+  on('filterResetBtn', () => resetFilters());
+
+  on('ratingStatusSeg', e => {
+    const b = e.target.closest('.seg-btn');
+    if (b) applyFilters({ ratingStatus: b.dataset.v });
+  });
+
+  on('availSeg', e => {
+    const b = e.target.closest('.seg-btn');
+    if (b) applyFilters({ avail: b.dataset.v });
+  });
+
+  on('sortSeg', e => {
+    const b = e.target.closest('.seg-btn');
+    if (!b) return;
+    const key = b.dataset.v;
+    if (key === 'rank') {
+      applyFilters({ sortKey: 'rank', sortAsc: true });
+    } else if (state.filters.sortKey === key) {
+      applyFilters({ sortAsc: !state.filters.sortAsc });
+    } else {
+      applyFilters({ sortKey: key, sortAsc: NATURAL_SORT_ASC[key] });
+    }
+  });
+
+  on('sortDirBtn', () => {
+    if (state.filters.sortKey === 'rank') return;
+    applyFilters({ sortAsc: !state.filters.sortAsc });
+  });
+
+  const starsRow = document.getElementById('minStarsRow');
+  if (starsRow) {
+    starsRow.addEventListener('click', e => {
+      const n = parseInt(e.target.dataset.n, 10);
+      if (!n) return;
+      const next = state.filters.minStars === n ? 0 : n; // click again to clear
+      applyFilters({ minStars: next });
+    });
+    starsRow.addEventListener('mouseover', e => {
+      const n = parseInt(e.target.dataset.n, 10);
+      if (!n) return;
+      starsRow.querySelectorAll('.star-min').forEach(s =>
+        s.classList.toggle('hovering', parseInt(s.dataset.n, 10) <= n));
+    });
+    starsRow.addEventListener('mouseleave', () => {
+      starsRow.querySelectorAll('.star-min').forEach(s => s.classList.remove('hovering'));
+    });
+  }
+
+  const bands = document.getElementById('simBands');
+  if (bands) {
+    bands.addEventListener('change', e => {
+      const cb = e.target.closest('.band-cb');
+      if (!cb) return;
+      const set = new Set(state.filters.simBands);
+      if (cb.checked) set.add(cb.dataset.band);
+      else set.delete(cb.dataset.band);
+      applyFilters({ simBands: [...set] });
+    });
+  }
+
+  const chipsBox = document.getElementById('activeChips');
+  if (chipsBox) {
+    chipsBox.addEventListener('click', e => {
+      const key = e.target.closest('[data-remove]')?.dataset.remove;
+      if (!key) return;
+      if (key === 'search') { state.filters.q = ''; const i = document.getElementById('filterInput'); if (i) i.value = ''; }
+      if (key === 'ratingStatus') state.filters.ratingStatus = 'any';
+      if (key === 'minStars') state.filters.minStars = 0;
+      if (key === 'simBands') state.filters.simBands = [];
+      if (key === 'avail') state.filters.avail = 'all';
+      syncFilterControls();
+      renderFilteredList();
+    });
+  }
+}
+
+bindFilterControls();
+
+function renderEntries(rows) {
   const list = document.getElementById('entryList');
   if (!list) return;
 
@@ -344,11 +607,6 @@ function renderEntries(rows) {
   });
 }
 
-document.addEventListener('input', e => {
-  if (e.target.id !== 'filterInput') return;
-  applyRowFilters();
-});
-
 // --------------------------------------------------------------------------
 // Routing
 // --------------------------------------------------------------------------
@@ -363,8 +621,6 @@ async function route() {
     if (emptyView) emptyView.classList.remove('hidden');
   } else {
     const [, name, mode] = hash.split('/');
-    const filterInput = document.getElementById('filterInput');
-    if (filterInput) filterInput.value = '';
     await loadMaqam(name, mode === 'full');
   }
 }
@@ -512,5 +768,6 @@ export {
   cap, fetchJSON, qualitativeLabel, renderConfigStatus, loadCatalog, loadMaqam,
   selectCandidate, renderEntries, route, statusBadge, openSettings,
   closeSettings, saveSettings, initSettings, openBrowse, closeBrowse, navigateBrowse,
-  paintStars, rateCandidate, starsGlyph, applyRowFilters
+  paintStars, rateCandidate, starsGlyph, applyRowFilters, applyFilters, resetFilters,
+  getFilteredSortedRows, matchesFilters, simBandOf
 };

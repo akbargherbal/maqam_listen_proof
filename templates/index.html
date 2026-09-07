@@ -47,6 +47,27 @@
     .entry-row.is-rated { border-left: 3px solid #B8863B; background: rgba(184,134,59,0.05); }
     .entry-row.is-rated.active { background: rgba(43,58,85,0.08); border-left-color:#2B3A55; }
 
+    /* Filter & Sort sidebar panel */
+    .panel-label { font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.12em; color:#7A6F58; font-weight:700; }
+    .seg-btn { cursor:pointer; font-family:'Space Mono',monospace; font-size:11px; padding:3px 8px; border:1px solid #D8C9A8; background:#FFFDF8; color:#7A6F58; transition:.15s; }
+    .seg-btn:first-child { border-radius:999px 0 0 999px; }
+    .seg-btn:last-child { border-radius:0 999px 999px 0; }
+    .seg-btn + .seg-btn { border-left:none; }
+    .seg-btn:hover { background:#EDE3CC; }
+    .seg-btn.on { background:#2B3A55; color:#F6EFE2; border-color:#2B3A55; }
+
+    .star-min { cursor:pointer; font-size:19px; color:#C9BB9C; line-height:1; transition:.1s; user-select:none; }
+    .star-min.on { color:#B8863B; }
+    .star-min.hovering { color:#2B3A55; }
+
+    .chip { cursor:pointer; font-family:'Space Mono',monospace; font-size:10px; padding:2px 7px; border-radius:999px; border:1px solid #D8C9A8; background:#F6EFE2; color:#7A6F58; transition:.15s; user-select:none; }
+    .chip.on { background:#2B3A55; color:#F6EFE2; border-color:#2B3A55; }
+    .chip.on small { color:#E8C88A; }
+
+    .band-row { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; }
+    .band-row input { accent-color:#2B3A55; }
+    .band-count { font-family:'Space Mono',monospace; font-size:10px; color:#B4A98F; margin-left:auto; }
+
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: #D8C9A8; border-radius: 4px; }
     audio { height: 34px; width: 100%; accent-color: #2B3A55; }
@@ -86,9 +107,9 @@
     </div>
 
     <!-- Main 2-Column Study Desk Layout -->
-    <div class="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6">
 
-      <!-- Sidebar: Maqam Index -->
+      <!-- Sidebar: Maqam Index + Filter & Sort -->
       <aside>
         <div class="mb-3 flex items-baseline justify-between">
           <p class="text-xs uppercase tracking-widest text-[#7A6F58] font-semibold">Catalog</p>
@@ -97,6 +118,67 @@
         <nav id="maqamNav" class="space-y-1.5">
           <p class="text-xs text-[#7A6F58] p-2">Loading maqams…</p>
         </nav>
+
+        <div class="divider my-4"></div>
+
+        <!-- Filter & Sort panel (applies to the active maqam's candidate list) -->
+        <div class="paper-card rounded-xl p-4">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-xs uppercase tracking-widest text-[#7A6F58] font-semibold">Filter &amp; Sort</p>
+            <button id="filterResetBtn" class="text-[11px] mono text-[#7A6F58] hover:text-[#9C4A3E]">reset all</button>
+          </div>
+
+          <div class="mb-4">
+            <input id="filterInput" type="text" placeholder="Search filename…"
+              class="paper-input rounded-lg px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-1 focus:ring-[#2B3A55]">
+          </div>
+
+          <div class="mb-4">
+            <p class="panel-label mb-1.5">MY RATING</p>
+            <div class="flex rounded-full overflow-hidden mb-2" id="ratingStatusSeg">
+              <button class="seg-btn on" data-v="any">Any</button>
+              <button class="seg-btn" data-v="rated">Rated</button>
+              <button class="seg-btn" data-v="unrated">Unrated</button>
+            </div>
+            <p class="text-[10px] text-[#7A6F58] mb-1">At least <span class="mono font-bold" id="minStarsLabel">any</span> ★</p>
+            <div class="flex items-center gap-1.5" id="minStarsRow">
+              <span class="star-min" data-n="1">★</span>
+              <span class="star-min" data-n="2">★</span>
+              <span class="star-min" data-n="3">★</span>
+              <span class="star-min" data-n="4">★</span>
+              <span class="star-min" data-n="5">★</span>
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <p class="panel-label mb-1.5">RESEMBLANCE (SIMILARITY)</p>
+            <div class="space-y-1.5" id="simBands"></div>
+          </div>
+
+          <div class="mb-4">
+            <p class="panel-label mb-1.5">AUDIO</p>
+            <div class="flex rounded-full overflow-hidden" id="availSeg">
+              <button class="seg-btn on" data-v="all">All</button>
+              <button class="seg-btn" data-v="playable">Available</button>
+              <button class="seg-btn" data-v="missing">Missing</button>
+            </div>
+          </div>
+
+          <div>
+            <p class="panel-label mb-1.5">SORT BY</p>
+            <div class="flex rounded-full overflow-hidden mb-1.5" id="sortSeg">
+              <button class="seg-btn on" data-v="rank">Rank</button>
+              <button class="seg-btn" data-v="sim">Score</button>
+              <button class="seg-btn" data-v="stars">My ★</button>
+              <button class="seg-btn" data-v="name">Name</button>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="sortDirBtn" title="Toggle direction"
+                class="text-[11px] mono px-2.5 py-1 rounded-lg paper-card hover:bg-[#EDE3CC]">rank ▲ fixed</button>
+              <p class="text-[10px] text-[#7A6F58]">rank is always ascending</p>
+            </div>
+          </div>
+        </div>
       </aside>
 
       <!-- Workspace Area -->
@@ -166,14 +248,10 @@
             </div>
           </section>
 
-          <!-- Search & Count Bar -->
+          <!-- Results Summary Bar -->
           <div class="flex items-center gap-3 mb-3 flex-wrap">
-            <input id="filterInput" type="text" placeholder="Filter by filename…"
-              class="paper-input rounded-lg px-3.5 py-2 text-sm w-72 focus:outline-none focus:ring-1 focus:ring-[#2B3A55]">
-            <label class="text-xs text-[#7A6F58] flex items-center gap-1.5 mono">
-              <input id="unratedOnlyCheckbox" type="checkbox" class="accent-[#2B3A55]"> unrated only
-            </label>
-            <span id="rowCount" class="text-xs text-[#7A6F58] mono ml-auto"></span>
+            <span id="rowCount" class="text-xs font-bold text-[#2B3A55] mono"></span>
+            <div id="activeChips" class="flex items-center gap-1.5 flex-wrap ml-auto"></div>
           </div>
 
           <!-- Annotated Candidate List -->
