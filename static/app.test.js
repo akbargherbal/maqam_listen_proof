@@ -24,7 +24,7 @@ const FIXTURE_HTML = `
   </aside>
 
   <div id="studyWorkspace">
-    <div id="emptyWorkspace" class="hidden"></div>
+    <div id="homeView" class="hidden"></div>
     <div id="activeWorkspace" class="hidden">
       <h2 id="maqamHeading"></h2>
       <p id="maqamSub"></p>
@@ -393,6 +393,10 @@ describe('navigation & study-mode chrome', () => {
     { rank: 1, filename: 'a.mp3', similarity: 0.9, found: true, stars: null },
     { rank: 2, filename: 'b.mp3', similarity: 0.8, found: true, stars: null },
   ] };
+  const STATS = {
+    totals: { candidates: 2, rated: 1, unrated: 1, pct: 50, avg_stars: 4, stars: { 1: 0, 2: 0, 3: 0, 4: 1, 5: 0 } },
+    maqams: [{ name: 'hijaz', arabic: 'حجاز', has_ref: true, total: 2, rated: 1, unrated: 1, avg_stars: 4, stars: { 1: 0, 2: 0, 3: 0, 4: 1, 5: 0 } }],
+  };
 
   function mockRouteFetch(payloads) {
     let call = 0;
@@ -406,12 +410,12 @@ describe('navigation & study-mode chrome', () => {
   it('hides Filter & Sort and Home chrome on the home page', async () => {
     const { route } = freshApp();
     window.history.replaceState(null, '', '#/');
-    mockRouteFetch([CATALOG]);
+    mockRouteFetch([CATALOG, STATS]);
     await route();
     expect(document.getElementById('filterPanelWrap').classList.contains('hidden')).toBe(true);
     expect(document.getElementById('homeBtn').classList.contains('hidden')).toBe(true);
     expect(document.getElementById('activeWorkspace').classList.contains('hidden')).toBe(true);
-    expect(document.getElementById('emptyWorkspace').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('homeView').classList.contains('hidden')).toBe(false);
   });
 
   it('shows Filter & Sort and Home chrome inside a maqam', async () => {
@@ -422,7 +426,52 @@ describe('navigation & study-mode chrome', () => {
     expect(document.getElementById('filterPanelWrap').classList.contains('hidden')).toBe(false);
     expect(document.getElementById('homeBtn').classList.contains('hidden')).toBe(false);
     expect(document.getElementById('activeWorkspace').classList.contains('hidden')).toBe(false);
-    expect(document.getElementById('emptyWorkspace').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('homeView').classList.contains('hidden')).toBe(true);
+  });
+});
+
+describe('home stats dashboard', () => {
+  const CONFIG = { results_dir: '/r', audio_root: '/a', ref_dir: '/f', is_configured: true };
+  const STATS = {
+    totals: { candidates: 600, rated: 279, unrated: 321, pct: 46.5, avg_stars: 3.76, stars: { 1: 18, 2: 29, 3: 55, 4: 78, 5: 99 } },
+    maqams: [
+      { name: 'hijaz', arabic: 'حجاز', has_ref: true, total: 144, rated: 96, unrated: 48, avg_stars: 3.9, stars: { 1: 6, 2: 9, 3: 22, 4: 28, 5: 31 } },
+      { name: 'nahawand', arabic: 'نهاوند', has_ref: false, total: 140, rated: 0, unrated: 140, avg_stars: null, stars: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 } },
+    ],
+  };
+
+  it('builds KPI cards, overall histogram and per-maqam rows', () => {
+    const { buildHomeDashboard } = freshApp();
+    document.getElementById('homeView').innerHTML = buildHomeDashboard(STATS);
+    const html = document.getElementById('homeView').textContent;
+    expect(html).toContain('600');
+    expect(html).toContain('279');
+    expect(html).toContain('46.5%');
+    expect(html).toContain('3.8');   // avg 3.76 -> toFixed(1)
+    expect(html).toContain('STAR DISTRIBUTION');
+    const links = [...document.querySelectorAll('#homeView a[href]')];
+    expect(links.some(a => a.getAttribute('href') === '#/maqam/hijaz')).toBe(true);
+    expect(links.some(a => a.getAttribute('href') === '#/maqam/nahawand')).toBe(true);
+    // unrated maqam shows a dash for avg
+    expect(html).toContain('No reference audio yet');
+  });
+
+  it('renders stats into the home view on route to the catalog', async () => {
+    const { route } = freshApp();
+    window.history.replaceState(null, '', '#/');
+    let call = 0;
+    global.fetch = vi.fn().mockImplementation(() => {
+      const payload = call++ === 0
+        ? { maqams: [{ name: 'hijaz', arabic: 'حجاز', count: 144, has_ref: true }], config: { results_dir: '/r', audio_root: '/a', ref_dir: '/f', is_configured: true } }
+        : STATS;
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload), text: () => Promise.resolve(JSON.stringify(payload)) });
+    });
+    await route();
+    const view = document.getElementById('homeView');
+    expect(view.classList.contains('hidden')).toBe(false);
+    expect(view.textContent).toContain('Review Progress');
+    expect(view.textContent).toContain('PER MAQAM');
+    expect(view.querySelector('a[href="#/maqam/hijaz"]')).toBeTruthy();
   });
 });
 

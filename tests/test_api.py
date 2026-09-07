@@ -169,3 +169,66 @@ class TestAudioStreaming:
     def test_candidate_missing_from_disk_returns_404(self, client):
         resp = client.get("/audio/track/hijaz/3")
         assert resp.status_code == 404
+
+
+class TestStatsEndpoint:
+    def test_empty_state_returns_zeroes(self, client):
+        data = client.get("/api/stats").get_json()
+        assert data["totals"]["candidates"] == 5   # hijaz(3) + ajam(2)
+        assert data["totals"]["rated"] == 0
+        assert data["totals"]["pct"] == 0
+        assert data["totals"]["avg_stars"] is None
+        assert data["totals"]["stars"] == {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
+        hijaz = next(m for m in data["maqams"] if m["name"] == "hijaz")
+        assert hijaz["total"] == 3
+        assert hijaz["rated"] == 0
+        assert hijaz["unrated"] == 3
+        assert hijaz["has_ref"] is True
+
+    def test_totals_and_histograms_aggregate_ratings(self, client):
+        client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "track_a.mp3", "stars": 4}),
+            content_type="application/json",
+        )
+        client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "track_b.mp3", "stars": 5}),
+            content_type="application/json",
+        )
+        client.post(
+            "/api/maqam/ajam/rating",
+            data=json.dumps({"filename": "ajam_track_one.mp3", "stars": 2}),
+            content_type="application/json",
+        )
+
+        data = client.get("/api/stats").get_json()
+        t = data["totals"]
+        assert t["candidates"] == 5
+        assert t["rated"] == 3
+        assert t["unrated"] == 2
+        assert t["pct"] == pytest.approx(60.0)
+        assert t["avg_stars"] == pytest.approx(round((4 + 5 + 2) / 3, 2))
+        assert t["stars"] == {"1": 0, "2": 1, "3": 0, "4": 1, "5": 1}
+
+        by_name = {m["name"]: m for m in data["maqams"]}
+        assert by_name["hijaz"]["rated"] == 2
+        assert by_name["hijaz"]["unrated"] == 1
+        assert by_name["hijaz"]["avg_stars"] == pytest.approx(4.5)
+        assert by_name["hijaz"]["stars"] == {"1": 0, "2": 0, "3": 0, "4": 1, "5": 1}
+        assert by_name["ajam"]["avg_stars"] == pytest.approx(2.0)
+
+    def test_rating_given_in_top50_mode_still_counted_in_full_stats(self, client):
+        # hijaz's top50 and full CSV share filenames in the fixture; a rating
+        # saved while browsing the top-50 list must appear in stats computed
+        # over the full ranking.
+        client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "missing_on_disk.mp3", "stars": 1}),
+            content_type="application/json",
+        )
+        data = client.get("/api/stats").get_json()
+        hijaz = next(m for m in data["maqams"] if m["name"] == "hijaz")
+        assert hijaz["stars"]["1"] == 1
+        assert hijaz["avg_stars"] == pytest.approx(1.0)
+        assert data["totals"]["rated"] == 1

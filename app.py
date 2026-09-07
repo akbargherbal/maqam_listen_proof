@@ -281,6 +281,67 @@ def save_rating(maqam: str, filename: str, stars):
 
 
 # --------------------------------------------------------------------------
+# Stats (per-maqam + overall review progress)
+# --------------------------------------------------------------------------
+
+
+def _row_filename(r) -> str:
+    csv_path = str(r.get("file") or r.get("filename") or "")
+    return str(r.get("filename") or Path(csv_path).name)
+
+
+def maqam_stats(name: str):
+    """Per-maqam rating stats over the FULL ranking (ratings are keyed by
+    filename, so a rating given in top-50 mode is still counted here)."""
+    df = load_ranking(name, full=True)
+    if df is None or not len(df):
+        return None
+    ratings = load_ratings(name)
+    hist = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    rated = 0
+    total = 0
+    for _, r in df.iterrows():
+        fn = _row_filename(r)
+        if not fn:
+            continue
+        total += 1
+        stars = ratings.get(fn, {}).get("stars")
+        if isinstance(stars, int) and stars in hist:
+            rated += 1
+            hist[stars] += 1
+    avg = (sum(k * v for k, v in hist.items()) / rated) if rated else None
+    return {
+        "name": name,
+        "arabic": MAQAM_ARABIC.get(name, ""),
+        "has_ref": resolve_ref_file(name) is not None,
+        "total": total,
+        "rated": rated,
+        "unrated": total - rated,
+        "avg_stars": round(avg, 2) if avg is not None else None,
+        "stars": hist,
+    }
+
+
+def collect_stats():
+    maqams = [m for m in (maqam_stats(n) for n in list_maqams()) if m]
+    cand = sum(m["total"] for m in maqams)
+    rated = sum(m["rated"] for m in maqams)
+    hist = {k: sum(m["stars"][k] for m in maqams) for k in range(1, 6)}
+    rated_avg = (sum(k * v for k, v in hist.items()) / rated) if rated else None
+    return {
+        "totals": {
+            "candidates": cand,
+            "rated": rated,
+            "unrated": cand - rated,
+            "pct": round(rated * 100.0 / cand, 1) if cand else 0.0,
+            "avg_stars": round(rated_avg, 2) if rated_avg is not None else None,
+            "stars": hist,
+        },
+        "maqams": maqams,
+    }
+
+
+# --------------------------------------------------------------------------
 # Page route
 # --------------------------------------------------------------------------
 
@@ -421,6 +482,11 @@ def api_maqam(maqam):
             "rows": rows,
         }
     )
+
+
+@app.route("/api/stats")
+def api_stats():
+    return jsonify(collect_stats())
 
 
 @app.route("/api/maqam/<maqam>/rating", methods=["POST"])

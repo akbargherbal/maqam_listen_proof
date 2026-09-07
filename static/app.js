@@ -145,9 +145,9 @@ async function loadMaqam(name, full) {
 
   await loadCatalog();
 
-  const emptyView = document.getElementById('emptyWorkspace');
+  const homeView = document.getElementById('homeView');
   const activeView = document.getElementById('activeWorkspace');
-  if (emptyView) emptyView.classList.add('hidden');
+  if (homeView) homeView.classList.add('hidden');
   if (activeView) activeView.classList.remove('hidden');
 
   const data = await fetchJSON(`/api/maqam/${name}?full=${full ? 1 : 0}`);
@@ -610,6 +610,121 @@ function renderEntries(rows) {
 }
 
 // --------------------------------------------------------------------------
+// Home dashboard (catalog / review progress)
+// --------------------------------------------------------------------------
+function starHistRows(stars, { glyph = false } = {}) {
+  const max = Math.max(1, ...Object.values(stars || {}).map(v => v || 0));
+  return [5, 4, 3, 2, 1].map(k => {
+    const n = (stars && stars[k]) || 0;
+    const label = glyph ? '★'.repeat(k) : String(k);
+    return `
+      <div class="stat-hist ${glyph ? '' : 'mini'}">
+        <span class="mono text-[10px] text-[#B8863B]">${label}</span>
+        <div class="stat-bar" style="height:${glyph ? 8 : 5}px">
+          <i style="width:${Math.round((n / max) * 100)}%"></i>
+        </div>
+        <span class="mono text-[10px] text-right text-[#7A6F58]">${n}</span>
+      </div>`;
+  }).join('');
+}
+
+function avgStars(v) {
+  return v == null ? '—' : Number(v).toFixed(1);
+}
+
+function buildHomeDashboard(stats) {
+  const t = stats && stats.totals;
+  if (!t) return `<div class="paper-card rounded-2xl p-10 text-center text-sm text-[#7A6F58]">No stats available yet.</div>`;
+  const rows = (stats.maqams || []).map(m => {
+    const pct = m.total ? Math.round((m.rated / m.total) * 100) : 0;
+    const disabledNote = !m.has_ref
+      ? `<p class="text-[11px] italic text-[#B4A98F]">No reference audio yet — rate once a reference file is added.</p>`
+      : starHistRows(m.stars, { glyph: false });
+    return `
+      <a href="#/maqam/${m.name}" class="maqam-row paper-card rounded-2xl p-4 block">
+        <div class="flex items-center gap-4 flex-wrap">
+          <div class="flex-1 min-w-[140px]">
+            <div class="flex items-center gap-2">
+              <span class="display font-bold text-lg">${cap(m.name)}</span>
+              ${m.arabic ? `<span class="arabic text-lg text-[#7A6F58]">${m.arabic}</span>` : ''}
+              <span class="w-2 h-2 rounded-full inline-block" style="background:${m.has_ref ? '#B8863B' : '#E4A0A0'};"
+                title="${m.has_ref ? 'reference audio found' : 'no reference audio'}"></span>
+            </div>
+            <p class="text-[11px] text-[#7A6F58]">${m.total} candidates · ${m.rated} rated · ${m.unrated} left</p>
+            <div class="stat-bar mt-1.5" style="max-width:260px;"><i style="width:${pct}%"></i></div>
+          </div>
+          <div class="hidden md:block w-56 shrink-0">${disabledNote}</div>
+          <div class="text-right shrink-0">
+            <p class="kpi-num text-2xl font-bold">${avgStars(m.avg_stars)}<span class="text-sm text-[#B8863B]">★</span></p>
+            <p class="text-[10px] mono text-[#7A6F58]">avg rating</p>
+          </div>
+          <span class="text-xs px-3 py-1.5 rounded-lg ${m.has_ref ? 'bg-[#2B3A55] text-[#F6EFE2]' : 'bg-[#EDE3CC] text-[#7A6F58]'} font-medium">Review →</span>
+        </div>
+      </a>`;
+  }).join('');
+
+  const rated = t.rated;
+  return `
+    <div class="flex items-baseline justify-between mb-4 flex-wrap gap-2">
+      <div>
+        <h2 class="display text-2xl sm:text-3xl font-bold">Review Progress</h2>
+        <p class="text-xs text-[#7A6F58] mt-1">All maqams · ratings across every candidate you've listened to</p>
+      </div>
+      <span class="mono text-[10px] px-2.5 py-1 rounded-full" style="background:#EDE3CC;color:#2B3A55;border:1px solid #C9BB9C;">LIVE OVERVIEW</span>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="paper-card rounded-2xl p-4">
+        <p class="mini-label">CANDIDATES</p>
+        <p class="kpi-num text-3xl font-bold mt-1">${t.candidates}</p>
+        <p class="text-[11px] text-[#7A6F58] mt-0.5">sum of ${stats.maqams.length} rankings</p>
+      </div>
+      <div class="paper-card rounded-2xl p-4">
+        <p class="mini-label">RATED</p>
+        <p class="kpi-num text-3xl font-bold mt-1">${rated}</p>
+        <p class="text-[11px] text-[#7A6F58] mt-0.5">tracks with 1–5★</p>
+      </div>
+      <div class="paper-card rounded-2xl p-4">
+        <p class="mini-label">COMPLETED</p>
+        <p class="kpi-num text-3xl font-bold mt-1" style="color:#B8863B;">${t.pct}%</p>
+        <div class="stat-bar mt-2"><i style="width:${t.pct}%"></i></div>
+      </div>
+      <div class="paper-card rounded-2xl p-4">
+        <p class="mini-label">AVG RATING</p>
+        <p class="kpi-num text-3xl font-bold mt-1">${avgStars(t.avg_stars)}<span class="text-base text-[#B8863B]">★</span></p>
+        <p class="text-[11px] text-[#7A6F58] mt-0.5">across rated tracks</p>
+      </div>
+    </div>
+
+    <section class="paper-card rounded-2xl p-5 mb-6">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <p class="mini-label">STAR DISTRIBUTION · ALL MAQAMS</p>
+        <span class="text-[10px] mono text-[#7A6F58]">rated: ${rated} · unrated: ${t.unrated}</span>
+      </div>
+      <div class="max-w-xl">${starHistRows(t.stars, { glyph: true })}</div>
+    </section>
+
+    <p class="mini-label mb-3">PER MAQAM</p>
+    <div class="space-y-3">${rows}</div>`;
+}
+
+async function renderHome() {
+  const view = document.getElementById('homeView');
+  if (!view) return;
+  view.innerHTML = `<div class="paper-card rounded-2xl p-10 text-center text-xs text-[#7A6F58]">Loading review stats…</div>`;
+  try {
+    const stats = await fetchJSON('/api/stats');
+    view.innerHTML = buildHomeDashboard(stats);
+  } catch (err) {
+    view.innerHTML = `
+      <div class="paper-card rounded-2xl p-10 text-center">
+        <p class="display text-xl font-bold mb-2">Review Progress</p>
+        <p class="text-sm text-[#7A6F58]">Could not load stats: ${err.message}</p>
+      </div>`;
+  }
+}
+
+// --------------------------------------------------------------------------
 // Routing
 // --------------------------------------------------------------------------
 // Show/hide study-mode chrome: the Filter & Sort panel and Home button only
@@ -642,9 +757,10 @@ async function route() {
     setStudyMode(false);
     await loadCatalog();
     const activeView = document.getElementById('activeWorkspace');
-    const emptyView = document.getElementById('emptyWorkspace');
+    const homeView = document.getElementById('homeView');
     if (activeView) activeView.classList.add('hidden');
-    if (emptyView) emptyView.classList.remove('hidden');
+    if (homeView) homeView.classList.remove('hidden');
+    await renderHome();
   } else {
     const [, name, mode] = hash.split('/');
     await loadMaqam(name, mode === 'full');
@@ -795,5 +911,6 @@ export {
   selectCandidate, renderEntries, route, statusBadge, openSettings,
   closeSettings, saveSettings, initSettings, openBrowse, closeBrowse, navigateBrowse,
   paintStars, rateCandidate, starsGlyph, applyRowFilters, applyFilters, resetFilters,
-  getFilteredSortedRows, matchesFilters, simBandOf, setStudyMode, initNavigation
+  getFilteredSortedRows, matchesFilters, simBandOf, setStudyMode, initNavigation,
+  buildHomeDashboard, renderHome
 };
