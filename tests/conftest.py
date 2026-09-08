@@ -10,14 +10,16 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 HIJAZ_TOP50_CSV = """rank,filename,similarity,file
-1,track_a.mp3,0.9123,/content/foreign/machine/path/track_a.mp3
-2,track_b.mp3,0.8501,/content/foreign/machine/path/track_b.mp3
-3,missing_on_disk.mp3,0.7000,/content/foreign/machine/path/missing_on_disk.mp3
+1,track_a.mp3,0.9123,/content/SUNO_BACKUP_11082026/run_antara/track_a.mp3
+2,track_b.mp3,0.8501,/content/SUNO_BACKUP_11082026/run_majnoon/track_b.mp3
+3,missing_on_disk.mp3,0.7000,/content/SUNO_BACKUP_11082026/run_missing/missing_on_disk.mp3
 """
 
+# ajam rows deliberately put TWO different takes under the same run folder to
+# prove resolution is per-row (run folder + filename), never basename alone.
 AJAM_FULL_CSV = """rank,filename,similarity,file
-1,ajam_track_one.mp3,0.8800,D:\\some\\windows\\path\\ajam_track_one.mp3
-2,ajam_track_two.mp3,0.8100,D:\\some\\windows\\path\\ajam_track_two.mp3
+1,ajam_track_one.mp3,0.8800,D:\\some\\windows\\path\\run_ajam\\ajam_track_one.mp3
+2,ajam_track_two.mp3,0.8100,D:\\some\\windows\\path\\run_ajam\\ajam_track_two.mp3
 """
 
 
@@ -48,12 +50,19 @@ def data_dirs(tmp_path):
     (results / "hijaz_ranking_top50.csv").write_text(HIJAZ_TOP50_CSV, encoding="utf-8")
     (results / "ajam_ranking.csv").write_text(AJAM_FULL_CSV, encoding="utf-8")
 
-    nested = audio / "some_album_folder"
-    nested.mkdir()
-    (nested / "track_a.mp3").write_bytes(b"fake-mp3-bytes-a")
-    (audio / "track_b.mp3").write_bytes(b"fake-mp3-bytes-b")
-    (audio / "ajam_track_one.mp3").write_bytes(b"fake-mp3-bytes-c")
-    (audio / "ajam_track_two.mp3").write_bytes(b"fake-mp3-bytes-d")
+    # Mirror the real layout: audio_root/<run folder>/<file>. Two DIFFERENT
+    # files can share a basename across folders (that is the bug under test);
+    # here each folder has distinct names so per-take ids are unambiguous.
+    run_antara = audio / "run_antara"
+    run_majnoon = audio / "run_majnoon"
+    run_ajam = audio / "run_ajam"
+    run_antara.mkdir()
+    run_majnoon.mkdir()
+    run_ajam.mkdir()
+    (run_antara / "track_a.mp3").write_bytes(b"fake-mp3-bytes-a")
+    (run_majnoon / "track_b.mp3").write_bytes(b"fake-mp3-bytes-b")
+    (run_ajam / "ajam_track_one.mp3").write_bytes(b"fake-mp3-bytes-c")
+    (run_ajam / "ajam_track_two.mp3").write_bytes(b"fake-mp3-bytes-d")
 
     (ref / "حجاز_reference_track.mp3").write_bytes(b"fake-ref-hijaz")
     (ref / "some_ajam_reference.mp3").write_bytes(b"fake-ref-ajam")
@@ -68,6 +77,45 @@ def configured_app(app_module, data_dirs):
     app_module.CONFIG["ref_dir"] = str(data_dirs["ref"])
     app_module.build_audio_index(force=True)
     return app_module
+
+
+DUP_CSV = """rank,filename,similarity,file
+1,same_song.mp3,0.9123,/content/SUNO_BACKUP_11082026/run_old/same_song.mp3
+2,same_song.mp3,0.8401,/content/SUNO_BACKUP_11082026/run_new/same_song.mp3
+3,only_old.mp3,0.7000,/content/SUNO_BACKUP_11082026/run_old/only_old.mp3
+"""
+
+
+@pytest.fixture()
+def dup_app(app_module, tmp_path):
+    """Fixture for the duplicate-basename bug: the SAME basename (same_song.mp3)
+    exists in two run folders as two distinct takes, ranked independently."""
+    results = tmp_path / "results"
+    audio = tmp_path / "audio"
+    ref = tmp_path / "ref"
+    results.mkdir()
+    audio.mkdir()
+    ref.mkdir()
+    (results / "hijaz_ranking.csv").write_text(DUP_CSV, encoding="utf-8")
+    (results / "hijaz_ranking_top50.csv").write_text(DUP_CSV, encoding="utf-8")
+    run_old = audio / "run_old"
+    run_new = audio / "run_new"
+    run_old.mkdir()
+    run_new.mkdir()
+    (run_old / "same_song.mp3").write_bytes(b"fake-old-take")
+    (run_new / "same_song.mp3").write_bytes(b"fake-new-take")
+    (run_old / "only_old.mp3").write_bytes(b"fake-only-old")
+
+    app_module.CONFIG["results_dir"] = str(results)
+    app_module.CONFIG["audio_root"] = str(audio)
+    app_module.CONFIG["ref_dir"] = str(ref)
+    app_module.build_audio_index(force=True)
+    return app_module
+
+
+@pytest.fixture()
+def dup_client(dup_app):
+    return dup_app.app.test_client()
 
 
 @pytest.fixture()

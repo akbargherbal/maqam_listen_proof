@@ -29,9 +29,12 @@ for example:
   the candidate list by filename or by "unrated only."
 - Lets you assign a 1–5 star rating to any candidate; ratings are saved
   immediately and persist per category.
-- Resolves candidate audio files by **filename only** (it indexes your
-  audio folder once), so it doesn't matter what machine or path format
-  the CSV's file paths originally came from.
+- Treats every candidate row as one distinct **take** (see "Per-take
+  identity" below), so two files that share a basename but live in different
+  run folders are rated and played back independently.
+- Resolves candidate audio files by their **run folder + filename** (it
+  indexes your audio folder tree once), so it doesn't matter what machine or
+  path format the CSV's file paths originally came from.
 - Ships with a Settings panel (gear icon) to point the app at your data
   folders without editing files by hand.
 
@@ -62,7 +65,7 @@ folders next to the app or point at folders anywhere else on disk.
 | Config key    | What it should contain                                                                 |
 |---------------|-------------------------------------------------------------------------------------------|
 | `results_dir` | One ranking CSV per category: `<category>_ranking.csv` (and optionally a `<category>_ranking_top50.csv` for a shorter view). Ratings are also written here, under `ratings/<category>.json`. |
-| `audio_root`  | Folder tree containing every candidate audio file. Indexed recursively by filename — subfolder structure doesn't matter. |
+| `audio_root`  | Folder tree containing every candidate audio file. For per-take resolution, keep the layout `audio_root/<run folder>/<file>` mirroring the CSV `file` paths' run folders — subfolders below that don't matter. |
 | `ref_dir`     | Folder containing one reference audio file per category.                                  |
 
 Each ranking CSV needs at minimum these columns:
@@ -70,9 +73,23 @@ Each ranking CSV needs at minimum these columns:
 | Column       | Meaning                                                              |
 |--------------|-----------------------------------------------------------------------|
 | `rank`       | Integer rank within the category                                     |
-| `filename`   | The candidate file's name (must match a file somewhere in `audio_root`) |
+| `filename`   | The candidate file's basename (shown in the UI)                      |
 | `similarity` | Numeric score used for display/sorting (any scale you like)          |
-| `file`       | Optional: an original path from wherever the CSV was generated — kept only for reference, never trusted for file resolution |
+| `file`       | Optional: an original path from wherever the CSV was generated. Its **last folder (the run folder) + filename** form the per-take identity used to resolve audio and to store ratings; the mount prefix is ignored. |
+
+## Per-take identity
+
+A bare filename is **not** a unique identifier: the same generated track can
+exist in several run folders (`.../majnoon_layla_18082026/song.mp3` vs
+`.../majnoon_layla_19082026/song.mp3`), each a *different* audio file that is
+ranked independently. The app therefore keys everything — ratings, stats,
+playback — by the composite identity `"<run folder>/<filename>"` taken from
+the CSV's `file` column. That identity is shared between the full and top-N
+views (they carry the same `file` values), so a rating given in one mode
+appears in the other.
+
+Rows whose take shares a basename with another take are shown with a small
+run-folder tag so you can tell them apart while listening and rating.
 
 Every path can also be overridden per-run with environment variables
 (`MAQAM_RESULTS_DIR`, `MAQAM_AUDIO_ROOT`, `MAQAM_REF_DIR`) without touching
@@ -89,13 +106,21 @@ Ratings are stored as plain JSON, one file per category, at
   "category": "example",
   "updated": "2026-08-25T12:00:00Z",
   "ratings": {
-    "some_candidate_file.mp3": { "stars": 4, "rated_at": "2026-08-25T12:00:00Z" }
+    "run_folder/some_candidate_file.mp3": { "stars": 4, "rated_at": "2026-08-25T12:00:00Z" }
   }
 }
 ```
 
-Ratings are keyed by filename (not rank), so a rating is preserved even if
-you switch between the full ranking and a top-N view.
+Ratings are keyed by the per-take identity (never by rank or bare filename),
+so a rating is preserved even if you switch between the full ranking and a
+top-N view, and two takes that share a basename keep separate ratings.
+
+**Migration from earlier basename-keyed files:** on load, any stored rating
+whose key is a bare basename is migrated automatically. If that basename
+names exactly one take, the rating carries over to it. If it names several
+takes, the old rating is ambiguous, so it is left out of the active view
+(kept on disk untouched) and those takes are shown unrated — re-rate each
+one individually.
 
 ## Running tests
 

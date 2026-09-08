@@ -151,8 +151,119 @@ class TestRatingsEndpoint:
         assert ratings_file.exists()
 
         # Fresh read straight from disk, independent of any app-level cache.
+        # Ratings are persisted under the per-take id (run folder + filename),
+        # never a bare basename.
         on_disk = json.loads(ratings_file.read_text(encoding="utf-8"))
-        assert on_disk["ratings"]["track_b.mp3"]["stars"] == 2
+        assert on_disk["ratings"]["run_majnoon/track_b.mp3"]["stars"] == 2
+
+
+class TestDuplicateBasenameTakes:
+    """The core bug: two distinct takes can share a basename across run
+    folders. Each must be its own row, resolve to its own audio file, and
+    carry its own rating."""
+
+    def test_same_basename_resolves_to_its_own_take(self, dup_client):
+        resp = dup_client.get("/api/maqam/hijaz")
+        assert resp.status_code == 200
+        by_rank = {r["rank"]: r for r in resp.get_json()["rows"]}
+        assert by_rank[1]["found"] is True
+        assert by_rank[2]["found"] is True
+        assert by_rank[1]["id"] == "run_old/same_song.mp3"
+        assert by_rank[2]["id"] == "run_new/same_song.mp3"
+
+    def test_each_take_streams_its_own_audio(self, dup_client):
+        old = dup_client.get("/audio/track/hijaz/1")
+        new = dup_client.get("/audio/track/hijaz/2")
+        assert old.status_code == 200
+        assert new.status_code == 200
+        assert old.data == b"fake-old-take"
+        assert new.data == b"fake-new-take"
+
+    def test_same_basename_rated_per_take_independently(self, dup_client):
+        r1 = dup_client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"id": "run_old/same_song.mp3", "stars": 5}),
+            content_type="application/json",
+        )
+        r2 = dup_client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"id": "run_new/same_song.mp3", "stars": 2}),
+            content_type="application/json",
+        )
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+
+        rows = dup_client.get("/api/maqam/hijaz").get_json()["rows"]
+        by_id = {r["id"]: r["stars"] for r in rows}
+        assert by_id["run_old/same_song.mp3"] == 5
+        assert by_id["run_new/same_song.mp3"] == 2
+
+    def test_rating_visible_across_modes_by_id(self, dup_client):
+        dup_client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"id": "run_old/only_old.mp3", "stars": 4}),
+            content_type="application/json",
+        )
+        top50 = dup_client.get("/api/maqam/hijaz?full=0").get_json()
+        full = dup_client.get("/api/maqam/hijaz?full=1").get_json()
+        top50_by_id = {r["id"]: r["stars"] for r in top50["rows"]}
+        full_by_id = {r["id"]: r["stars"] for r in full["rows"]}
+        assert top50_by_id["run_old/only_old.mp3"] == 4
+        assert full_by_id["run_old/only_old.mp3"] == 4
+
+
+class TestLegacyRatingsMigration:
+    def _write_ratings(self, dup_app, raw):
+        p = dup_app.ratings_path("hijaz")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"maqam": "hijaz", "ratings": raw}), encoding="utf-8")
+
+    def test_unique_basename_migrates_to_its_take(self, dup_app, dup_client):
+        # Pre-fix ratings were keyed by bare basename. 'only_old.mp3' names a
+        # single take, so it should carry over automatically.
+        self._write_ratings(dup_app, {"only_old.mp3": {"stars": 4, "rated_at": "x"}})
+        rows = dup_client.get("/api/maqam/hijaz").get_json()["rows"]
+        by_id = {r["id"]: r["stars"] for r in rows}
+        assert by_id["run_old/only_old.mp3"] == 4
+        assert dup_client.get("/api/maqam/hijaz").get_json()["rated_count"] == 1
+
+    def test_ambiguous_basename_is_excluded_for_reration(self, dup_app, dup_client):
+        # 'same_song.mp3' names two takes -> the old rating can't be attributed
+        # to either. Both takes show unrated (they need redoing), and the
+        # original key is left untouched on disk.
+        self._write_ratings(dup_app, {"same_song.mp3": {"stars": 3, "rated_at": "x"}})
+        data = dup_client.get("/api/maqam/hijaz").get_json()
+        by_id = {r["id"]: r["stars"] for r in data["rows"]}
+        assert by_id["run_old/same_song.mp3"] is None
+        assert by_id["run_new/same_song.mp3"] is None
+        assert data["rated_count"] == 0
+        on_disk = json.loads(dup_app.ratings_path("hijaz").read_text(encoding="utf-8"))
+        assert "same_song.mp3" in on_disk["ratings"]
+
+    def test_ambiguous_basename_post_rejected_with_ids(self, dup_client):
+        resp = dup_client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"filename": "same_song.mp3", "stars": 3}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+        body = resp.get_data(as_text=True)
+        assert "run_old/same_song.mp3" in body
+        assert "run_new/same_song.mp3" in body
+
+    def test_new_rating_ignores_stale_ambiguous_key(self, dup_app, dup_client):
+        # After the user re-rates one take by id, the stale bare-basename key
+        # from the old format must not leak a phantom rating onto the other take.
+        self._write_ratings(dup_app, {"same_song.mp3": {"stars": 3, "rated_at": "x"}})
+        dup_client.post(
+            "/api/maqam/hijaz/rating",
+            data=json.dumps({"id": "run_old/same_song.mp3", "stars": 5}),
+            content_type="application/json",
+        )
+        rows = dup_client.get("/api/maqam/hijaz").get_json()["rows"]
+        by_id = {r["id"]: r["stars"] for r in rows}
+        assert by_id["run_old/same_song.mp3"] == 5
+        assert by_id["run_new/same_song.mp3"] is None
 
 
 class TestAudioStreaming:

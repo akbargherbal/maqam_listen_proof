@@ -147,35 +147,86 @@ AUDIO_EXTS = tuple(e.lower() for e in CONFIG.get("audio_extensions", [".mp3"]))
 app = Flask(__name__)  # uses default templates/ and static/ folders
 
 # --------------------------------------------------------------------------
-# Filename index (the real fix for "links break when paths change")
+# Per-take identity + audio index
 # --------------------------------------------------------------------------
+# A basename alone is NOT a unique identifier: the same generated take can
+# exist in several run folders (e.g. majnoon_layla_18082026 vs _19082026),
+# each a *different* audio file that is ranked independently. Everything in
+# the app -- ratings, stats, playback resolution -- is therefore keyed by a
+# composite identity "<run folder>/<filename>", derived from the CSV's own
+# `file` column (whose last folder is the run folder). That identity is
+# stable across the top50 and full CSVs (they carry the same `file` values)
+# and, because the local audio_root mirrors the run-folder layout, it maps
+# 1:1 onto a local relative path.
 
-_audio_index = {}
+
+def _norm(p) -> str:
+    """Normalize a path string to forward slashes."""
+    return str(p).replace("\\", "/").strip()
+
+
+def item_identity(filename=None, filepath=None) -> str:
+    """Composite per-take id: '<last folder of filepath>/<filename>'.
+
+    Falls back to the bare filename when the row carries no folder (either
+    no `file` column, or the file sat at the top of its tree).
+    """
+    fn = ""
+    if filename is not None:
+        fn = str(filename).strip()
+    fp = _norm(filepath) if filepath else ""
+    if not fn or fn.lower() in ("nan", "none"):
+        fn = fp.rstrip("/").rsplit("/", 1)[-1] if fp else ""
+    if not fn:
+        return ""
+    if fp:
+        tail = fp.rstrip("/")
+        head = tail.rsplit("/", 1)[0] if "/" in tail else ""
+        parent = head.rsplit("/", 1)[-1] if head else ""
+        if parent and parent != fn:
+            return f"{parent}/{fn}"
+    return fn
+
+
+# Index of local audio by relative path under audio_root (posix). Because
+# identical basenames may live in different run folders, the *key* is the
+# relative path -- never the bare basename.
+_audio_rel = {}
+_audio_rel_low = {}
 _index_root_used = None
 
 
 def build_audio_index(force=False):
-    global _audio_index, _index_root_used
+    global _audio_rel, _audio_rel_low, _index_root_used
     root = audio_root()
-    if _audio_index and not force and _index_root_used == root:
-        return _audio_index
-    index = {}
+    if _audio_rel and not force and _index_root_used == root:
+        return _audio_rel
+    rel_index = {}
     if root.exists():
-        for r, _dirs, files in os.walk(root):
+        base = root.resolve()
+        for r, _dirs, files in os.walk(base):
             for fn in files:
                 if fn.lower().endswith(AUDIO_EXTS):
-                    index.setdefault(fn, str(Path(r) / fn))  # first match wins
-    _audio_index = index
+                    full = Path(r) / fn
+                    rel = str(full.relative_to(base)).replace("\\", "/")
+                    rel_index.setdefault(rel, str(full))
+    _audio_rel = rel_index
+    _audio_rel_low = {k.lower(): v for k, v in rel_index.items()}
     _index_root_used = root
-    return index
+    return _audio_rel
 
 
-def resolve_audio_file(csv_path_value: str):
-    """Map a (possibly foreign-machine) CSV path to a real local file by filename."""
-    if not csv_path_value:
+def resolve_audio(item_id: str):
+    """Map a per-take identity ('<run folder>/<filename>') to the local file,
+    falling back to a case-insensitive match (Windows trees)."""
+    if not item_id:
         return None
-    filename = Path(str(csv_path_value).replace("\\", "/")).name
-    return build_audio_index().get(filename)
+    if item_id in _audio_rel:
+        return _audio_rel[item_id]
+    low = item_id.lower()
+    if low in _audio_rel_low:
+        return _audio_rel_low[low]
+    return None
 
 
 def resolve_ref_file(maqam: str):
@@ -227,10 +278,13 @@ def load_ranking(maqam: str, full: bool = False):
 # --------------------------------------------------------------------------
 # Ratings (human review verdicts) -- persisted as JSON, one file per maqam
 # --------------------------------------------------------------------------
-# Keyed by filename (not rank), because the same file's rank differs between
-# the top50 and full-ranking CSVs -- filename is the one stable identifier
-# shared by both, so a rating given in one mode is automatically visible in
-# the other.
+# Keyed by the per-take identity "<run folder>/<filename>", never by rank or
+# bare filename (the same basename can name 2-3 *distinct* takes, and the
+# same take has a different rank in top50 vs full CSVs). Legacy ratings that
+# were saved under a bare basename are migrated automatically on load: a
+# basename that names exactly one take is re-keyed to that take's identity;
+# a basename shared by several takes is ambiguous, so it is excluded from
+# the active view (left on disk untouched) and must be re-rated per take.
 
 
 def _now_iso() -> str:
@@ -241,21 +295,62 @@ def ratings_path(maqam: str) -> Path:
     return results_dir() / "ratings" / f"{maqam}.json"
 
 
+def _basename_to_ids(maqam: str) -> dict:
+    """{basename: {per-take ids}} built from the FULL ranking CSV. Used to
+    migrate legacy ratings and to accept `filename` in the rating API."""
+    df = load_ranking(maqam, full=True)
+    if df is None:
+        return {}
+    m = {}
+    for _, r in df.iterrows():
+        fn = _row_filename(r)
+        if fn:
+            m.setdefault(fn, set()).add(_row_id(r))
+    return m
+
+
+def _migrate_ratings(maqam: str, raw: dict) -> dict:
+    """Re-key a stored ratings dict (legacy basename keys -> per-take ids).
+
+    Bare-basename keys that resolve to exactly one take are carried over.
+    Keys on colliding basenames (2+ takes) are ambiguous and dropped from the
+    active view -- they stay in the file, but the rows they could belong to
+    are shown unrated so they can be re-rated individually.
+    """
+    m = _basename_to_ids(maqam)
+    if not m:
+        return dict(raw)  # no full CSV available; keep everything as-is
+    known = {i for ids in m.values() for i in ids}
+    out = {}
+    for key, val in raw.items():
+        if key in known:
+            out[key] = val  # already a per-take id
+            continue
+        ids = m.get(key)
+        if ids and len(ids) == 1:
+            out[next(iter(ids))] = val  # unambiguous legacy basename
+        elif key not in m:
+            out[key] = val  # not part of this ranking; preserve
+        # else: ambiguous basename -> intentionally excluded
+    return out
+
+
 def load_ratings(maqam: str) -> dict:
-    """Return {filename: {"stars": int, "rated_at": str}} for a maqam."""
+    """Return {per-take id: {"stars": int, "rated_at": str}} for a maqam."""
     p = ratings_path(maqam)
     if not p.exists():
         return {}
     try:
         with open(p, "r", encoding="utf-8") as f:
-            return json.load(f).get("ratings", {})
+            raw = json.load(f).get("ratings", {})
     except Exception as e:
         print(f"[ratings] Could not parse {p} ({e}); treating as empty.")
         return {}
+    return _migrate_ratings(maqam, raw)
 
 
-def save_rating(maqam: str, filename: str, stars):
-    """Set (1-5) or clear (None) a single filename's rating and write to disk."""
+def save_rating(maqam: str, item_id: str, stars):
+    """Set (1-5) or clear (None) a single per-take id's rating and write it."""
     p = ratings_path(maqam)
     p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -269,9 +364,9 @@ def save_rating(maqam: str, filename: str, stars):
     data.setdefault("ratings", {})
 
     if stars is None:
-        data["ratings"].pop(filename, None)
+        data["ratings"].pop(item_id, None)
     else:
-        data["ratings"][filename] = {"stars": int(stars), "rated_at": _now_iso()}
+        data["ratings"][item_id] = {"stars": int(stars), "rated_at": _now_iso()}
 
     data["maqam"] = maqam
     data["updated"] = _now_iso()
@@ -290,9 +385,14 @@ def _row_filename(r) -> str:
     return str(r.get("filename") or Path(csv_path).name)
 
 
+def _row_id(r) -> str:
+    """Per-take identity for a ranking row (pandas Series / row dict)."""
+    return item_identity(r.get("filename"), r.get("file"))
+
+
 def maqam_stats(name: str):
     """Per-maqam rating stats over the FULL ranking (ratings are keyed by
-    filename, so a rating given in top-50 mode is still counted here)."""
+    per-take id, so a rating given in top-50 mode is still counted here)."""
     df = load_ranking(name, full=True)
     if df is None or not len(df):
         return None
@@ -301,11 +401,11 @@ def maqam_stats(name: str):
     rated = 0
     total = 0
     for _, r in df.iterrows():
-        fn = _row_filename(r)
-        if not fn:
+        iid = _row_id(r)
+        if not iid:
             continue
         total += 1
-        stars = ratings.get(fn, {}).get("stars")
+        stars = ratings.get(iid, {}).get("stars")
         if isinstance(stars, int) and stars in hist:
             rated += 1
             hist[stars] += 1
@@ -459,16 +559,17 @@ def api_maqam(maqam):
 
     rows = []
     for _, r in df.iterrows():
-        csv_path = str(r.get("file") or r.get("filename") or "")
-        local = resolve_audio_file(csv_path)
-        filename = str(r.get("filename", Path(csv_path).name))
+        iid = _row_id(r)
+        local = resolve_audio(iid)
+        filename = _row_filename(r)
         rows.append(
             {
+                "id": iid,
                 "rank": int(r.get("rank")),
                 "filename": filename,
                 "similarity": float(r.get("similarity", 0.0)),
                 "found": local is not None,
-                "stars": ratings.get(filename, {}).get("stars"),
+                "stars": ratings.get(iid, {}).get("stars"),
             }
         )
 
@@ -491,21 +592,41 @@ def api_stats():
 
 @app.route("/api/maqam/<maqam>/rating", methods=["POST"])
 def api_set_rating(maqam):
-    """Set or clear a star rating (1-5, or null/0 to clear) for one filename."""
+    """Set or clear a star rating (1-5, or null/0 to clear) for one take.
+
+    The payload should carry the per-take `id` (e.g. 'majnoon_layla_18082026/
+    song.mp3'). A legacy bare `filename` is also accepted when it uniquely
+    identifies one take; ambiguous names are rejected so the caller must
+    re-rate each take explicitly.
+    """
     data = request.get_json(force=True, silent=True) or {}
-    filename = data.get("filename")
+    item_id = str(data.get("id") or "").strip()
+    filename = str(data.get("filename") or "").strip()
     stars = data.get("stars")
 
-    if not filename:
-        abort(400, "filename is required")
+    if not item_id:
+        if not filename:
+            abort(400, "id (or a unique filename) is required")
+        ids = _basename_to_ids(maqam).get(filename)
+        if not ids:
+            abort(400, f"'{filename}' does not appear in the '{maqam}' ranking")
+        if len(ids) > 1:
+            abort(
+                400,
+                f"'{filename}' names multiple takes in '{maqam}'; "
+                "resend with the per-take id "
+                f"({', '.join(sorted(ids))})",
+            )
+        item_id = next(iter(ids))
+
     if stars is not None and stars != 0 and not (1 <= int(stars) <= 5):
         abort(400, "stars must be an integer 1-5, or null/0 to clear")
 
     stars = int(stars) if stars else None
-    save_rating(maqam, filename, stars)
+    save_rating(maqam, item_id, stars)
 
     ratings = load_ratings(maqam)
-    return jsonify({"filename": filename, "stars": stars, "rated_count": len(ratings)})
+    return jsonify({"id": item_id, "stars": stars, "rated_count": len(ratings)})
 
 
 @app.route("/refresh-index")
@@ -536,8 +657,8 @@ def audio_track(maqam, rank):
     match = df[df["rank"] == rank]
     if match.empty:
         abort(404)
-    csv_path = str(match.iloc[0].get("file") or match.iloc[0].get("filename") or "")
-    local = resolve_audio_file(csv_path)
+    row = match.iloc[0]
+    local = resolve_audio(_row_id(row))
     if not local or not Path(local).exists():
         abort(404, f"Local audio file not found for rank {rank} in '{maqam}'")
     return send_file(local)
@@ -548,5 +669,5 @@ if __name__ == "__main__":
     print(f"[startup] audio_root  = {audio_root()}")
     print(f"[startup] ref_dir     = {ref_dir()}")
     build_audio_index()
-    print(f"[startup] indexed {len(_audio_index)} audio files under audio_root")
+    print(f"[startup] indexed {len(_audio_rel)} audio files under audio_root")
     app.run(debug=True, port=5000)

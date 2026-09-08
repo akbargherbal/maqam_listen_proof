@@ -69,27 +69,51 @@ class TestAudioIndex:
     def test_build_audio_index_walks_recursively(self, app_module, data_dirs):
         app_module.CONFIG["audio_root"] = str(data_dirs["audio"])
         index = app_module.build_audio_index(force=True)
-        assert "track_a.mp3" in index
-        assert "track_b.mp3" in index
+        assert "run_antara/track_a.mp3" in index
+        assert "run_majnoon/track_b.mp3" in index
         assert len(index) == 4
 
-    def test_resolve_audio_file_ignores_foreign_machine_path(
+    def test_resolve_audio_uses_run_folder_and_filename(
         self, app_module, data_dirs
     ):
         app_module.CONFIG["audio_root"] = str(data_dirs["audio"])
         app_module.build_audio_index(force=True)
-        local = app_module.resolve_audio_file(
-            "/content/SUNO_BACKUP/some_run/track_a.mp3"
-        )
+        # Foreign-machine CSV path -> per-take identity -> correct local file,
+        # disambiguated by its run folder.
+        local = app_module.resolve_audio("run_antara/track_a.mp3")
         assert local is not None
         assert local.endswith("track_a.mp3")
+        assert "run_antara" in local
 
-    def test_resolve_audio_file_returns_none_for_missing_file(
+    def test_resolve_audio_returns_none_for_missing_file(
         self, app_module, data_dirs
     ):
         app_module.CONFIG["audio_root"] = str(data_dirs["audio"])
         app_module.build_audio_index(force=True)
-        assert app_module.resolve_audio_file("nonexistent_track.mp3") is None
+        assert app_module.resolve_audio("run_missing/missing_on_disk.mp3") is None
+
+
+class TestItemIdentity:
+    def test_identity_joins_run_folder_and_filename(self, app_module):
+        assert (
+            app_module.item_identity("song.mp3", "/content/RUN_a/song.mp3")
+            == "RUN_a/song.mp3"
+        )
+
+    def test_identity_handles_windows_path(self, app_module):
+        assert (
+            app_module.item_identity("song.mp3", "D:\\top\\run_b\\song.mp3")
+            == "run_b/song.mp3"
+        )
+
+    def test_identity_falls_back_to_bare_filename(self, app_module):
+        # No `file` column -> bare basename.
+        assert app_module.item_identity("song.mp3", None) == "song.mp3"
+        # File sat at the top of its tree -> bare basename.
+        assert app_module.item_identity(None, "song.mp3") == "song.mp3"
+
+    def test_identity_from_filepath_alone_keeps_folder(self, app_module):
+        assert app_module.item_identity(None, "/top/run_x/song.mp3") == "run_x/song.mp3"
 
 
 class TestResolveRefFile:

@@ -30,6 +30,20 @@ function bandCount(id) {
   return state.rows.filter(r => simBandOf(r.similarity) === id).length;
 }
 
+// A row is one *take*. Its `id` is "<run folder>/<filename>", because the same
+// basename can be generated in several run folders as distinct audio files.
+function takeOf(r) {
+  const i = r && r.id;
+  return i && i.includes('/') ? i.slice(0, i.indexOf('/')) : null;
+}
+function isDuplicateName(name) {
+  return state.rows.filter(r => r.filename === name).length > 1;
+}
+function rowTakeTag(r) {
+  const t = takeOf(r);
+  return t && isDuplicateName(r.filename) ? t : null;
+}
+
 function matchesFilters(r) {
   const f = state.filters;
   if (f.q && !r.filename.toLowerCase().includes(f.q)) return false;
@@ -204,8 +218,10 @@ function selectCandidate(rank) {
   const t = state.rows.find(r => r.rank === rank);
   if (!t) return;
 
+  const tag = rowTakeTag(t);
   document.getElementById('candName').textContent = t.filename;
-  document.getElementById('candNote').textContent = `Rank #${t.rank} · ${qualitativeLabel(t.similarity)}`;
+  document.getElementById('candNote').textContent =
+    `Rank #${t.rank} · ${qualitativeLabel(t.similarity)}` + (tag ? ` · take: ${tag}` : '');
   document.getElementById('candScoreBadge').textContent = t.similarity.toFixed(4);
 
   const wrap = document.getElementById('candPlayerWrap');
@@ -287,7 +303,9 @@ async function rateCandidate(rank, stars) {
     await fetchJSON(`/api/maqam/${state.current}/rating`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: t.filename, stars: t.stars }),
+      body: JSON.stringify(t.id
+        ? { id: t.id, stars: t.stars }
+        : { filename: t.filename, stars: t.stars }),
     });
   } catch (err) {
     // Revert optimistic update on failure
@@ -595,7 +613,7 @@ function renderEntries(rows) {
         <span class="mono text-xs font-bold text-[#7A6F58] w-7 shrink-0">#${r.rank}</span>
         <div class="flex-1 min-w-0">
           <p class="arabic text-sm font-medium truncate">${r.filename}</p>
-          <p class="text-[11px] italic text-[#7A6F58]">${qualitativeLabel(r.similarity)}</p>
+          <p class="text-[11px] italic text-[#7A6F58]">${rowTakeTag(r) ? `<span class="mono not-italic font-bold">${rowTakeTag(r)}</span> · ` : ''}${qualitativeLabel(r.similarity)}</p>
         </div>
         <span class="mono text-xs font-bold text-[#2B3A55] w-16 text-right shrink-0">${r.similarity.toFixed(4)}</span>
         <span class="text-xs px-2 py-0.5 rounded-full ${r.found ? 'bg-[#EDE3CC] text-[#2B3A55]' : 'bg-red-100 text-red-800'} text-[10px]">
