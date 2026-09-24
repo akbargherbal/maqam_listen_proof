@@ -24,6 +24,14 @@ Legacy (pre-migration) rating files keyed by bare basename are handled too:
 the basename is resolved through that category's ranking CSV when one is
 findable, otherwise by a unique basename match under audio_root. Basenames
 that are still ambiguous are skipped and reported.
+
+If a take's source folder (its run folder under `audio_root`) contains a
+`workspace_manifest.json`, it is copied alongside the exported take(s) into
+the same destination folder (once per destination folder, not once per
+take). Pass `--no-manifest` to skip this. When `--flat` mixes takes from
+different run folders into one destination folder, later manifests are
+saved as `<run folder>__workspace_manifest.json` instead of overwriting the
+first one.
 """
 
 import argparse
@@ -35,6 +43,7 @@ import sys
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
+MANIFEST_NAME = "workspace_manifest.json"
 
 
 def _resolve_path(value, base=None):
@@ -177,6 +186,8 @@ def main(argv=None):
     ap.add_argument("--flat", action="store_true", help="drop run-folder level (out/<category>/<file>)")
     ap.add_argument("--no-maqam-folders", action="store_true", help="drop per-category level in the output")
     ap.add_argument("--dry-run", action="store_true", help="only print what would be copied")
+    ap.add_argument("--no-manifest", action="store_true",
+                    help="don't copy each take's workspace_manifest.json alongside it")
     args = ap.parse_args(argv)
 
     ratings_dir, ranking_hint = discover(args.ratings)
@@ -229,7 +240,10 @@ def main(argv=None):
             plan.append((maqam, key, key, stars, src))
 
     seen_names = {}
+    manifest_dest_source = {}  # dest folder -> run folder whose manifest is already there
+    manifest_handled = set()   # dest manifest paths already copied/announced
     copied = 0
+    manifests_copied = 0
     for maqam, take_id, key, stars, src in plan:
         maqam_dir = None if args.no_maqam_folders else maqam
         if args.flat:
@@ -252,8 +266,29 @@ def main(argv=None):
         if dest.exists() and dest.resolve() == src.resolve():
             skipped.append((maqam, key, "source is already at destination"))
             continue
+
+        manifest_dest = None
+        if not args.no_manifest:
+            manifest_src = src.parent / MANIFEST_NAME
+            if manifest_src.is_file():
+                dest_dir = dest.parent
+                # First take exported into a given destination folder decides
+                # whose manifest lives there. If a later take in the same
+                # folder comes from a different run (only possible with
+                # --flat), give its manifest a prefixed name instead of
+                # silently overwriting the first one.
+                owner = manifest_dest_source.setdefault(dest_dir, src.parent)
+                if owner == src.parent:
+                    manifest_dest = dest_dir / MANIFEST_NAME
+                else:
+                    manifest_dest = dest_dir / f"{src.parent.name}__{MANIFEST_NAME}"
+
         if args.dry_run:
             print(f"would copy  {src}  ->  {dest}")
+            if manifest_dest is not None and manifest_dest not in manifest_handled:
+                print(f"would copy  {manifest_src}  ->  {manifest_dest}")
+                manifest_handled.add(manifest_dest)
+                manifests_copied += 1
             copied += 1
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -261,7 +296,16 @@ def main(argv=None):
         copied += 1
         print(f"copied {stars}*  {maqam}: {take_id}  ->  {dest.relative_to(out_root)}")
 
-    print(f"\n{copied} file(s) exported to {out_root}")
+        if manifest_dest is not None and manifest_dest not in manifest_handled:
+            shutil.copy2(str(manifest_src), str(manifest_dest))
+            manifest_handled.add(manifest_dest)
+            manifests_copied += 1
+            print(f"copied manifest         ->  {manifest_dest.relative_to(out_root)}")
+
+    summary = f"\n{copied} file(s) exported to {out_root}"
+    if manifests_copied:
+        summary += f" ({manifests_copied} workspace_manifest.json also copied)"
+    print(summary)
     for maqam, key, reason in skipped:
         print(f"  skipped [{maqam}] {key}: {reason}")
     if skipped:
