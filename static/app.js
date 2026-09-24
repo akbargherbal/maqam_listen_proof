@@ -1,5 +1,56 @@
-const state = { current: null, rows: [], full: false, selectedCandidate: null, ratedCount: 0 };
+const state = {
+  current: null, rows: [], full: false, selectedCandidate: null, ratedCount: 0,
+  experiment: null,
+};
 const browseState = { target: null, path: null };
+
+// --------------------------------------------------------------------------
+// Experiment spec (generic A/B testing)
+// --------------------------------------------------------------------------
+// Mirrors the backend DEFAULT_EXPERIMENT so pure helpers (qualitativeLabel,
+// simBandOf, ...) behave identically even before the spec is fetched. Once
+// /api/config (or /api/categories) responds, `state.experiment` is replaced
+// with the effective spec, so labels, score bands, score precision, and the
+// URL route prefix are fully configurable without touching this file.
+const DEFAULT_EXPERIMENT = {
+  id: 'maqam',
+  title: 'Maqam Study',
+  route_prefix: 'maqam',
+  labels: { singular: 'maqam', plural: 'maqams' },
+  rtl: true,
+  score: {
+    direction: 'desc',
+    decimals: 4,
+    bands: [
+      { id: 'vc', label: 'Very close', qualitative: 'Very close resemblance', min: 0.870, max: 1.001 },
+      { id: 'cl', label: 'Close', qualitative: 'Close resemblance', min: 0.840, max: 0.870 },
+      { id: 'mo', label: 'Moderate', qualitative: 'Moderate resemblance', min: 0.800, max: 0.840 },
+      { id: 'di', label: 'Distant', qualitative: 'Distant resemblance', min: 0.000, max: 0.800 },
+    ],
+  },
+};
+
+function exp() {
+  return state.experiment || DEFAULT_EXPERIMENT;
+}
+function expLabels() {
+  return exp().labels || DEFAULT_EXPERIMENT.labels;
+}
+function expBands() {
+  const b = exp().score && exp().score.bands;
+  return Array.isArray(b) && b.length ? b : DEFAULT_EXPERIMENT.score.bands;
+}
+function expDecimals() {
+  const d = exp().score && exp().score.decimals;
+  return Number.isInteger(d) ? d : DEFAULT_EXPERIMENT.score.decimals;
+}
+function routePrefix() {
+  return exp().route_prefix || DEFAULT_EXPERIMENT.route_prefix;
+}
+function setExperiment(spec) {
+  if (spec === null) { state.experiment = null; return; }
+  if (spec && typeof spec === 'object') state.experiment = spec;
+}
 
 // --------------------------------------------------------------------------
 // Filter & Sort state
@@ -15,16 +66,12 @@ const DEFAULT_FILTERS = {
 };
 state.filters = { ...DEFAULT_FILTERS };
 
-const SIM_BANDS = [
-  { id: 'vc', label: 'Very close', min: 0.870, max: 1.001 },
-  { id: 'cl', label: 'Close', min: 0.840, max: 0.870 },
-  { id: 'mo', label: 'Moderate', min: 0.800, max: 0.840 },
-  { id: 'di', label: 'Distant', min: 0.000, max: 0.800 },
-];
 const NATURAL_SORT_ASC = { rank: true, sim: false, stars: false, name: true };
 
 function simBandOf(score) {
-  return SIM_BANDS.find(b => score >= b.min && score < b.max)?.id || 'di';
+  const bands = expBands();
+  const hit = bands.find(b => score >= b.min && score < b.max);
+  return hit ? hit.id : bands[bands.length - 1].id;
 }
 function bandCount(id) {
   return state.rows.filter(r => simBandOf(r.similarity) === id).length;
@@ -86,10 +133,14 @@ async function fetchJSON(url, opts) {
 }
 
 function qualitativeLabel(score) {
-  if (score >= 0.87) return 'Very close resemblance';
-  if (score >= 0.84) return 'Close resemblance';
-  if (score >= 0.80) return 'Moderate resemblance';
-  return 'Distant resemblance';
+  const bands = expBands();
+  const hit = bands.find(b => score >= b.min && score < b.max);
+  if (!hit) return bands[bands.length - 1].qualitative || bands[bands.length - 1].label;
+  return hit.qualitative || hit.label;
+}
+
+function formatScore(score) {
+  return Number(score || 0).toFixed(expDecimals());
 }
 
 // --------------------------------------------------------------------------
@@ -116,23 +167,41 @@ function renderConfigStatus(c) {
   }
 }
 
+// Apply spec-driven chrome (document title, brand, and the "all categories"
+// button) so the same UI can present itself as anything the spec names.
+function applyExperimentChrome() {
+  const e = exp();
+  if (e.title) {
+    document.title = e.title;
+    const brand = document.getElementById('brandHome');
+    if (brand) brand.textContent = e.title;
+  }
+  const allBtn = document.getElementById('allMaqamsBtn');
+  if (allBtn) allBtn.textContent = `‹ All ${cap(expLabels().plural)}`;
+  const singularEls = document.querySelectorAll('[data-label-singular]');
+  singularEls.forEach(el => { el.textContent = expLabels().singular; });
+}
+
 async function loadCatalog() {
-  const data = await fetchJSON('/api/maqams');
+  const data = await fetchJSON('/api/categories');
+  if (data.experiment) setExperiment(data.experiment);
+  applyExperimentChrome();
   renderConfigStatus(data.config);
 
+  const items = data.categories || data.maqams || [];
   const nav = document.getElementById('maqamNav');
   const countEl = document.getElementById('maqamCountTotal');
-  if (countEl) countEl.textContent = `${data.maqams.length} maqams`;
+  if (countEl) countEl.textContent = `${items.length} ${expLabels().plural}`;
 
-  if (!data.maqams || data.maqams.length === 0) {
+  if (!items.length) {
     nav.innerHTML = `<p class="text-xs text-[#7A6F58] p-2">No ranking CSVs found in results folder.</p>`;
     return;
   }
 
-  nav.innerHTML = data.maqams.map(m => {
+  nav.innerHTML = items.map(m => {
     const active = m.name === state.current;
     return `
-      <a href="#/maqam/${m.name}" data-maqam="${m.name}"
+      <a href="#/${routePrefix()}/${m.name}" data-maqam="${m.name}"
         class="maqam-nav-item block px-3 py-2 rounded-xl text-sm transition-colors paper-card ${active ? 'active' : 'hover:bg-[#EDE3CC]'}">
         <div class="flex items-center justify-between">
           <span class="font-semibold">${cap(m.name)}</span>
@@ -164,13 +233,14 @@ async function loadMaqam(name, full) {
   if (homeView) homeView.classList.add('hidden');
   if (activeView) activeView.classList.remove('hidden');
 
-  const data = await fetchJSON(`/api/maqam/${name}?full=${full ? 1 : 0}`);
+  const data = await fetchJSON(`/api/category/${name}?full=${full ? 1 : 0}`);
   state.rows = data.rows;
   state.ratedCount = data.rated_count || 0;
 
+  const subsetLabel = (exp().ranking && exp().ranking.subset_label) || 'Top 50';
   document.getElementById('maqamHeading').innerHTML = `${cap(name)} <span class="arabic text-2xl">${data.arabic || ''}</span>`;
   document.getElementById('maqamSub').textContent =
-    `${data.total} tracks catalogued (${full ? 'full ranking' : 'top 50'}) · ${state.ratedCount} rated`;
+    `${data.total} tracks catalogued (${full ? 'full ranking' : subsetLabel}) · ${state.ratedCount} rated`;
 
   // Mode indicator: quiet tonal shade shift, no new hues, same palette as
   // hover/active states elsewhere in the app.
@@ -178,7 +248,7 @@ async function loadMaqam(name, full) {
   const comparePanel = document.getElementById('comparePanel');
   if (modeTag) {
     modeTag.classList.remove('hidden');
-    modeTag.textContent = full ? 'ALL FILES' : 'TOP 50';
+    modeTag.textContent = full ? 'ALL FILES' : subsetLabel.toUpperCase();
     modeTag.classList.toggle('full', full);
   }
   if (comparePanel) {
@@ -199,11 +269,11 @@ async function loadMaqam(name, full) {
   document.getElementById('candPlayerWrap').innerHTML = `<audio controls disabled class="opacity-40"></audio>`;
   document.getElementById('ratingRow').classList.add('hidden');
 
-  // Top50 vs Full Toggle
+  // Subset vs Full Toggle
   const toggleBtn = document.getElementById('toggleFullBtn');
-  toggleBtn.textContent = full ? 'Switch to Top 50' : 'Switch to Full Ranking';
+  toggleBtn.textContent = full ? `Switch to ${subsetLabel}` : 'Switch to Full Ranking';
   toggleBtn.onclick = () => {
-    location.hash = `#/maqam/${name}${full ? '' : '/full'}`;
+    location.hash = `#/${routePrefix()}/${name}${full ? '' : '/full'}`;
   };
 
   // Rebuild list from scratch with default filters, then auto-select the
@@ -222,7 +292,7 @@ function selectCandidate(rank) {
   document.getElementById('candName').textContent = t.filename;
   document.getElementById('candNote').textContent =
     `Rank #${t.rank} · ${qualitativeLabel(t.similarity)}` + (tag ? ` · take: ${tag}` : '');
-  document.getElementById('candScoreBadge').textContent = t.similarity.toFixed(4);
+  document.getElementById('candScoreBadge').textContent = formatScore(t.similarity);
 
   const wrap = document.getElementById('candPlayerWrap');
   if (t.found) {
@@ -300,7 +370,7 @@ async function rateCandidate(rank, stars) {
   reflowIfRatingSort();
 
   try {
-    await fetchJSON(`/api/maqam/${state.current}/rating`, {
+    await fetchJSON(`/api/category/${state.current}/rating`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(t.id
@@ -426,7 +496,7 @@ function renderActiveChips() {
   if (f.ratingStatus === 'unrated') chips.push(removeChip('ratingStatus', 'Unrated'));
   if (f.minStars) chips.push(removeChip('minStars', `★${f.minStars}+`));
   f.simBands.forEach(id => {
-    const b = SIM_BANDS.find(x => x.id === id);
+    const b = expBands().find(x => x.id === id);
     if (b) chips.push(removeChip('simBands', b.label));
   });
   if (f.avail === 'playable') chips.push(removeChip('avail', 'Available'));
@@ -502,7 +572,7 @@ function syncDirBtn() {
 function renderBandButtons() {
   const box = document.getElementById('simBands');
   if (!box) return;
-  box.innerHTML = SIM_BANDS.map(b => `
+  box.innerHTML = expBands().map(b => `
     <label class="band-row">
       <input type="checkbox" data-band="${b.id}" class="band-cb" ${state.filters.simBands.includes(b.id) ? 'checked' : ''}>
       <span>${b.label}</span>
@@ -615,7 +685,7 @@ function renderEntries(rows) {
           <p class="arabic text-sm font-medium truncate">${r.filename}</p>
           <p class="text-[11px] italic text-[#7A6F58]">${rowTakeTag(r) ? `<span class="mono not-italic font-bold">${rowTakeTag(r)}</span> · ` : ''}${qualitativeLabel(r.similarity)}</p>
         </div>
-        <span class="mono text-xs font-bold text-[#2B3A55] w-16 text-right shrink-0">${r.similarity.toFixed(4)}</span>
+        <span class="mono text-xs font-bold text-[#2B3A55] w-16 text-right shrink-0">${formatScore(r.similarity)}</span>
         <span class="text-xs px-2 py-0.5 rounded-full ${r.found ? 'bg-[#EDE3CC] text-[#2B3A55]' : 'bg-red-100 text-red-800'} text-[10px]">
           ${r.found ? 'Play' : 'Missing'}
         </span>
@@ -653,13 +723,16 @@ function avgStars(v) {
 function buildHomeDashboard(stats) {
   const t = stats && stats.totals;
   if (!t) return `<div class="paper-card rounded-2xl p-10 text-center text-sm text-[#7A6F58]">No stats available yet.</div>`;
-  const rows = (stats.maqams || []).map(m => {
+  const items = stats.categories || stats.maqams || [];
+  const plural = cap(expLabels().plural);
+  const singular = expLabels().singular.toUpperCase();
+  const rows = items.map(m => {
     const pct = m.total ? Math.round((m.rated / m.total) * 100) : 0;
     const disabledNote = !m.has_ref
       ? `<p class="text-[11px] italic text-[#B4A98F]">No reference audio yet — rate once a reference file is added.</p>`
       : starHistRows(m.stars, { glyph: false });
     return `
-      <a href="#/maqam/${m.name}" class="maqam-row paper-card rounded-2xl p-4 block">
+      <a href="#/${routePrefix()}/${m.name}" class="maqam-row paper-card rounded-2xl p-4 block">
         <div class="flex items-center gap-4 flex-wrap">
           <div class="flex-1 min-w-[140px]">
             <div class="flex items-center gap-2">
@@ -686,7 +759,7 @@ function buildHomeDashboard(stats) {
     <div class="flex items-baseline justify-between mb-4 flex-wrap gap-2">
       <div>
         <h2 class="display text-2xl sm:text-3xl font-bold">Review Progress</h2>
-        <p class="text-xs text-[#7A6F58] mt-1">All maqams · ratings across every candidate you've listened to</p>
+        <p class="text-xs text-[#7A6F58] mt-1">All ${expLabels().plural} · ratings across every candidate you've listened to</p>
       </div>
       <span class="mono text-[10px] px-2.5 py-1 rounded-full" style="background:#EDE3CC;color:#2B3A55;border:1px solid #C9BB9C;">LIVE OVERVIEW</span>
     </div>
@@ -716,13 +789,13 @@ function buildHomeDashboard(stats) {
 
     <section class="paper-card rounded-2xl p-5 mb-6">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <p class="mini-label">STAR DISTRIBUTION · ALL MAQAMS</p>
+        <p class="mini-label">STAR DISTRIBUTION · ALL ${plural.toUpperCase()}</p>
         <span class="text-[10px] mono text-[#7A6F58]">rated: ${rated} · unrated: ${t.unrated}</span>
       </div>
       <div class="max-w-xl">${starHistRows(t.stars, { glyph: true })}</div>
     </section>
 
-    <p class="mini-label mb-3">PER MAQAM</p>
+    <p class="mini-label mb-3">PER ${singular}</p>
     <div class="space-y-3">${rows}</div>`;
 }
 
@@ -930,5 +1003,6 @@ export {
   closeSettings, saveSettings, initSettings, openBrowse, closeBrowse, navigateBrowse,
   paintStars, rateCandidate, starsGlyph, applyRowFilters, applyFilters, resetFilters,
   getFilteredSortedRows, matchesFilters, simBandOf, setStudyMode, initNavigation,
-  buildHomeDashboard, renderHome
+  buildHomeDashboard, renderHome, setExperiment, expBands, expLabels, formatScore,
+  routePrefix, applyExperimentChrome
 };

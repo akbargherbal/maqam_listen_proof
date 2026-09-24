@@ -68,7 +68,9 @@ folders next to the app or point at folders anywhere else on disk.
 | `audio_root`  | Folder tree containing every candidate audio file. For per-take resolution, keep the layout `audio_root/<run folder>/<file>` mirroring the CSV `file` paths' run folders — subfolders below that don't matter. |
 | `ref_dir`     | Folder containing one reference audio file per category.                                  |
 
-Each ranking CSV needs at minimum these columns:
+Each ranking CSV needs at minimum these columns (the names below are the
+defaults; the `experiment.columns` spec remaps them — see "Adapting to a
+different A/B test"):
 
 | Column       | Meaning                                                              |
 |--------------|-----------------------------------------------------------------------|
@@ -92,9 +94,63 @@ Rows whose take shares a basename with another take are shown with a small
 run-folder tag so you can tell them apart while listening and rating.
 
 Every path can also be overridden per-run with environment variables
-(`MAQAM_RESULTS_DIR`, `MAQAM_AUDIO_ROOT`, `MAQAM_REF_DIR`) without touching
-`config.json`. Environment variables take priority over both the config
-file and the Settings panel.
+(`AB_RESULTS_DIR`, `AB_AUDIO_ROOT`, `AB_REF_DIR`; the original
+`MAQAM_RESULTS_DIR`, `MAQAM_AUDIO_ROOT`, `MAQAM_REF_DIR` still work).
+Environment variables take priority over both the config file and the
+Settings panel.
+
+## Adapting to a different A/B test
+
+Nothing about the app is tied to maqam: the domain vocabulary, the ranking
+CSV column names, the score bands/precision, the ranking-file naming, and the
+reference strategy all come from an **experiment spec**. The default spec
+reproduces the maqam setup exactly, so an existing installation is unchanged.
+
+A spec can live as an inline `"experiment"` block in `config.json`, or as a
+named preset file `experiments/<id>.json` selected at run time:
+
+```bash
+AB_EXPERIMENT=example_models python app.py
+# or point at any file directly:
+AB_EXPERIMENT_FILE=/abs/path/to/spec.json python app.py
+```
+
+Precedence is: built-in defaults → `experiments/<id>.json` → inline
+`experiment` block in `config.json`.
+
+Spec fields (all optional; omitted fields fall back to the defaults):
+
+| Field | Meaning |
+|-------|---------|
+| `id`, `title` | Identifier and the document/brand title shown in the UI. |
+| `route_prefix` | URL hash prefix (`#/<prefix>/<category>`), default `maqam`. |
+| `labels.singular` / `labels.plural` | What one group / many groups are called in the UI. |
+| `display` | Optional per-category display text (e.g. script/RTL), replacing `maqam_arabic`. |
+| `rtl` | Whether category labels are right-to-left. |
+| `columns` | Maps the canonical `rank`, `name`, `score`, `path`, and optional `id`/explicit-id fields to your CSV's column names. Set a field to `null` to drop it (e.g. no `rank` column → ranks are inferred 1..N). |
+| `score.direction` | `desc` (higher is better) or `asc`. |
+| `score.decimals` | How many decimals to display for a score. |
+| `score.bands` | Filter bands: `{id, label, qualitative, min, max}`. Drives the resemblance filter and the qualitative caption. |
+| `ranking.glob` / `full_suffix` / `subset_suffix` / `subset_label` | How ranking CSVs are named and what the full-vs-subset toggle is called. |
+| `reference.mode` | `folder_match` (default), `shared` (one `reference.file` for all), or `none` (candidate-only). |
+
+A non-maqam example is included under `experiments/example_models.json` with
+sample data in `examples/example_models/`. It ranks voice-model takes across
+run folders, uses `variant`/`path`/`score` columns, a 0–100 score with custom
+bands, and no reference:
+
+```bash
+AB_EXPERIMENT=example_models \
+AB_RESULTS_DIR=examples/example_models/results \
+AB_AUDIO_ROOT=examples/example_models/audio \
+AB_REF_DIR=examples/example_models/ref \
+python app.py
+```
+
+The generic API routes (`/api/categories`, `/api/category/<id>`,
+`/api/category/<id>/rating`) mirror the original `/api/maqams`,
+`/api/maqam/<id>`, and `/api/maqam/<id>/rating`, which remain available as
+backward-compatible aliases.
 
 ## Ratings storage
 

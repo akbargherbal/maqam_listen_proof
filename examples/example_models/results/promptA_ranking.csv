@@ -1,0 +1,6 @@
+variant,path,score
+take01.wav,/content/model_runs/run_v1/take01.wav,91.2
+take01.wav,/content/model_runs/run_v2/take01.wav,88.4
+take02.wav,/content/model_runs/run_v1/take02.wav,77.0
+take02.wav,/content/model_runs/run_v2/take02.wav,64.3
+take03.wav,/content/model_runs/run_v3/take03.wav,52.1

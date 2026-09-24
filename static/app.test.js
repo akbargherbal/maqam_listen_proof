@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as app from './app.js';
 
 window.removeEventListener('hashchange', app.route);
@@ -472,6 +472,49 @@ describe('home stats dashboard', () => {
     expect(view.textContent).toContain('Review Progress');
     expect(view.textContent).toContain('PER MAQAM');
     expect(view.querySelector('a[href="#/maqam/hijaz"]')).toBeTruthy();
+  });
+});
+
+describe('experiment spec (generic A/B)', () => {
+  const SPEC = {
+    id: 'example_models',
+    title: 'Voice Model A/B',
+    route_prefix: 'model',
+    labels: { singular: 'prompt', plural: 'prompts' },
+    score: {
+      direction: 'desc',
+      decimals: 1,
+      bands: [
+        { id: 'hi', label: 'Strong', qualitative: 'Strong candidate', min: 80, max: 101 },
+        { id: 'lo', label: 'Weak', qualitative: 'Weak candidate', min: 0, max: 80 },
+      ],
+    },
+  };
+
+  afterEach(() => app.setExperiment(null));
+
+  it('derives qualitative labels and score precision from the spec', () => {
+    freshApp();
+    app.setExperiment(SPEC);
+    expect(app.qualitativeLabel(90)).toBe('Strong candidate');
+    expect(app.qualitativeLabel(20)).toBe('Weak candidate');
+    expect(app.formatScore(91.234)).toBe('91.2');
+    expect(app.simBandOf(90)).toBe('hi');
+    expect(app.simBandOf(10)).toBe('lo');
+  });
+
+  it('renders labels and route prefix from the fetched spec', async () => {
+    freshApp();
+    app.setExperiment(SPEC);
+    mockFetchOnce({
+      categories: [{ name: 'promptA', arabic: '', count: 5, has_ref: false }],
+      experiment: SPEC,
+      config: { results_dir: '/r', audio_root: '/a', ref_dir: '/f', is_configured: true },
+    });
+    await app.loadCatalog();
+    const link = document.querySelector('#maqamNav a');
+    expect(link.getAttribute('href')).toBe('#/model/promptA');
+    expect(document.getElementById('maqamCountTotal').textContent).toBe('1 prompts');
   });
 });
 

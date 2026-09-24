@@ -26,10 +26,19 @@ PORTABILITY DESIGN
        b) picked from the in-app Settings panel (gear icon, top-right)
           -- this writes back to config.json and takes effect
           immediately, no restart needed
-       c) overridden with an environment variable (MAQAM_RESULTS_DIR /
-          MAQAM_AUDIO_ROOT / MAQAM_REF_DIR) for one-off runs
+       c) overridden with an environment variable (AB_RESULTS_DIR /
+          AB_AUDIO_ROOT / AB_REF_DIR, or the legacy MAQAM_* names) for
+          one-off runs
    Env vars win if set; otherwise the last value saved (via file or
    Settings panel) is used.
+
+4. Domain specifics are NOT hardcoded. An "experiment" spec (built-in
+   defaults, optionally overridden by experiments/<id>.json selected with
+   AB_EXPERIMENT, and/or an inline "experiment" block in config.json) defines
+   the group noun/labels, the ranking CSV column names, the score direction,
+   precision and filter bands, the ranking-file naming, and the reference
+   strategy. The default spec reproduces the maqam setup exactly. See README
+   "Adapting to a different A/B test".
 
 SETUP
 -----
@@ -71,8 +80,100 @@ DEFAULT_CONFIG = {
     "audio_extensions": [".mp3", ".wav", ".flac", ".m4a"],
 }
 
+# --------------------------------------------------------------------------
+# Experiment spec (generic A/B testing)
+# --------------------------------------------------------------------------
+# Everything domain-specific -- the noun for a group ("maqam", "prompt",
+# "model", ...), the ranking CSV column names, the score direction/bands, the
+# ranking file naming, and how a reference item is located -- lives in one
+# declarative spec. DEFAULT_EXPERIMENT below reproduces this app's original
+# maqam behavior exactly, so an unconfigured run is unchanged. A spec can be
+# supplied (in increasing priority) by:
+#     a) an experiments/<id>.json file, selected with the AB_EXPERIMENT env
+#        var or an "id" in the inline `experiment` config block, or
+#        AB_EXPERIMENT_FILE=/abs/path.json
+#     b) an inline "experiment" block in config.json
+# so a new A/B test never requires editing Python.
+
+DEFAULT_EXPERIMENT = {
+    "id": "maqam",
+    "title": "Maqam Study",
+    "route_prefix": "maqam",
+    "labels": {"singular": "maqam", "plural": "maqams"},
+    "display": {},
+    "rtl": True,
+    "columns": {
+        "rank": "rank",
+        "name": "filename",
+        "score": "similarity",
+        "path": "file",
+        "id": None,
+    },
+    "score": {
+        "direction": "desc",
+        "decimals": 4,
+        "bands": [
+            {"id": "vc", "label": "Very close", "qualitative": "Very close resemblance", "min": 0.870, "max": 1.001},
+            {"id": "cl", "label": "Close", "qualitative": "Close resemblance", "min": 0.840, "max": 0.870},
+            {"id": "mo", "label": "Moderate", "qualitative": "Moderate resemblance", "min": 0.800, "max": 0.840},
+            {"id": "di", "label": "Distant", "qualitative": "Distant resemblance", "min": 0.000, "max": 0.800},
+        ],
+    },
+    "ranking": {
+        "glob": "*_ranking*.csv",
+        "full_suffix": "",
+        "subset_suffix": "_top50",
+        "subset_label": "Top 50",
+    },
+    "reference": {"mode": "folder_match", "file": None},
+}
+
+EXPERIMENTS_DIRNAME = "experiments"
+
 # Keys the Settings panel is allowed to change and persist.
 EDITABLE_KEYS = ("results_dir", "audio_root", "ref_dir")
+
+
+def _deep_merge(base, override):
+    """Recursively merge `override` onto `base` (dicts only); returns a copy."""
+    if isinstance(base, dict) and isinstance(override, dict):
+        out = dict(base)
+        for k, v in override.items():
+            out[k] = _deep_merge(out[k], v) if k in out else v
+        return out
+    return override
+
+
+def load_experiment(cfg):
+    """Resolve the effective experiment spec from defaults + preset + config."""
+    exp = json.loads(json.dumps(DEFAULT_EXPERIMENT))  # deep copy
+    inline = cfg.get("experiment") if isinstance(cfg.get("experiment"), dict) else {}
+
+    exp_id = os.environ.get("AB_EXPERIMENT") or inline.get("id")
+    preset_path = None
+    if os.environ.get("AB_EXPERIMENT_FILE"):
+        preset_path = resolve(os.environ["AB_EXPERIMENT_FILE"])
+    elif exp_id:
+        base = resolve(cfg.get("experiments_dir", EXPERIMENTS_DIRNAME))
+        cand = base / f"{exp_id}.json"
+        if cand.exists():
+            preset_path = cand
+
+    if preset_path and preset_path.exists():
+        try:
+            exp = _deep_merge(exp, json.loads(preset_path.read_text(encoding="utf-8")))
+        except Exception as e:
+            print(f"[experiment] Could not parse {preset_path} ({e}); using defaults.")
+
+    exp = _deep_merge(exp, inline)
+    if exp_id:
+        exp["id"] = exp_id
+    # The original `maqam_arabic` map seeds the per-category display text only
+    # for the built-in maqam preset, so other experiments don't inherit it.
+    if exp.get("id") == DEFAULT_EXPERIMENT["id"] and not exp.get("display") \
+            and isinstance(cfg.get("maqam_arabic"), dict):
+        exp["display"] = dict(cfg["maqam_arabic"])
+    return exp
 
 # In-memory config, loaded once at startup and mutated in place whenever
 # the Settings panel (or an env var) changes a path.
@@ -95,14 +196,17 @@ def load_config():
         except Exception as e:
             print(f"[config] Could not write default config.json ({e}).")
 
-    # Environment variables always win (useful for quick overrides).
-    for key, env in [
-        ("results_dir", "MAQAM_RESULTS_DIR"),
-        ("audio_root", "MAQAM_AUDIO_ROOT"),
-        ("ref_dir", "MAQAM_REF_DIR"),
+    # Environment variables always win (useful for quick overrides). Generic
+    # AB_* names are preferred; the original MAQAM_* names still work.
+    for key, envs in [
+        ("results_dir", ("AB_RESULTS_DIR", "MAQAM_RESULTS_DIR")),
+        ("audio_root", ("AB_AUDIO_ROOT", "MAQAM_AUDIO_ROOT")),
+        ("ref_dir", ("AB_REF_DIR", "MAQAM_REF_DIR")),
     ]:
-        if os.environ.get(env):
-            cfg[key] = os.environ[env]
+        for env in envs:
+            if os.environ.get(env):
+                cfg[key] = os.environ[env]
+                break
     return cfg
 
 
@@ -141,7 +245,10 @@ def ref_dir() -> Path:
 
 
 CONFIG = load_config()
-MAQAM_ARABIC = CONFIG.get("maqam_arabic", {})
+EXPERIMENT = load_experiment(CONFIG)
+# Per-category display text (e.g. Arabic script). Kept under the historical
+# name for callers that still use it; sourced from the experiment spec now.
+MAQAM_ARABIC = EXPERIMENT.get("display") or CONFIG.get("maqam_arabic", {})
 AUDIO_EXTS = tuple(e.lower() for e in CONFIG.get("audio_extensions", [".mp3"]))
 
 app = Flask(__name__)  # uses default templates/ and static/ folders
@@ -163,6 +270,36 @@ app = Flask(__name__)  # uses default templates/ and static/ folders
 def _norm(p) -> str:
     """Normalize a path string to forward slashes."""
     return str(p).replace("\\", "/").strip()
+
+
+def _columns():
+    return EXPERIMENT.get("columns") or {}
+
+
+def _ranking_cfg():
+    return EXPERIMENT.get("ranking") or {}
+
+
+def _as_int(v, default=None):
+    """Best-effort int coercion; NaN/missing/garbage -> default (never raises)."""
+    try:
+        if v is None:
+            return default
+        f = float(v)
+        if f != f:  # NaN
+            return default
+        return int(f)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(v, default=0.0):
+    """Best-effort float coercion; NaN/missing/garbage -> default."""
+    try:
+        f = float(v)
+        return default if f != f else f
+    except (TypeError, ValueError):
+        return default
 
 
 def item_identity(filename=None, filepath=None) -> str:
@@ -229,18 +366,37 @@ def resolve_audio(item_id: str):
     return None
 
 
-def resolve_ref_file(maqam: str):
-    arabic = MAQAM_ARABIC.get(maqam, "")
+def resolve_ref_file(category: str):
+    """Locate the reference item for a category, per the experiment spec.
+
+    Modes:
+      * folder_match (default): match a file in ref_dir by the category's
+        display text prefix, else by a substring of the category name.
+      * shared: one reference file shared by every category
+        (`reference.file`, resolved under ref_dir when relative).
+      * none: no reference (candidate-only A/B tests).
+    """
+    ref = EXPERIMENT.get("reference") or {}
+    mode = ref.get("mode", "folder_match")
+    if mode == "none":
+        return None
     rdir = ref_dir()
+    if mode == "shared":
+        fn = ref.get("file")
+        if not fn:
+            return None
+        p = Path(fn) if Path(fn).is_absolute() else (rdir / fn)
+        return p if p.exists() else None
     if not rdir.exists():
         return None
+    display = MAQAM_ARABIC.get(category, "")
     candidates = [f for f in rdir.iterdir() if f.is_file()]
-    if arabic:
+    if display:
         for f in candidates:
-            if f.name.startswith(arabic):
+            if f.name.startswith(display):
                 return f
     for f in candidates:
-        if maqam.lower() in f.name.lower():
+        if category.lower() in f.name.lower():
             return f
     return None
 
@@ -250,29 +406,96 @@ def resolve_ref_file(maqam: str):
 # --------------------------------------------------------------------------
 
 
-def list_maqams():
+def _canonicalize(df):
+    """Add canonical columns (`rank`, `filename`, `file`, `similarity`, and an
+    optional `item_id`) sourced from the experiment's configured column names,
+    so downstream code is independent of the CSV's own headers."""
+    cols = _columns()
+
+    def col(key):
+        v = cols.get(key)
+        return v.strip().lower() if isinstance(v, str) and v.strip() else None
+
+    name_c, path_c, rank_c, score_c, id_c = (
+        col("name"), col("path"), col("rank"), col("score"), col("id")
+    )
+
+    if name_c and name_c in df.columns:
+        df = df.copy()
+        df["filename"] = df[name_c].astype("string").fillna("")
+    elif path_c and path_c in df.columns:
+        df = df.copy()
+        df["filename"] = df[path_c].astype("string").fillna("").map(
+            lambda p: str(p).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        )
+    elif "filename" not in df.columns:
+        df = df.copy()
+        df["filename"] = ""
+
+    if path_c and path_c in df.columns:
+        df = df.copy()
+        df["file"] = df[path_c]
+    elif "file" not in df.columns:
+        df = df.copy()
+        df["file"] = ""
+
+    if rank_c and rank_c in df.columns:
+        df = df.copy()
+        df["rank"] = pd.to_numeric(df[rank_c], errors="coerce")
+    elif "rank" not in df.columns:
+        df = df.copy()
+        df["rank"] = range(1, len(df) + 1)
+
+    if score_c and score_c in df.columns:
+        df = df.copy()
+        df["similarity"] = pd.to_numeric(df[score_c], errors="coerce")
+    elif "similarity" not in df.columns:
+        df = df.copy()
+        df["similarity"] = 0.0
+
+    if id_c and id_c in df.columns:
+        df = df.copy()
+        df["item_id"] = df[id_c].astype("string").fillna("")
+    return df
+
+
+def _ranking_path(category: str, suffix: str) -> Path:
+    return results_dir() / f"{category}_ranking{suffix}.csv"
+
+
+def list_categories():
     rdir = results_dir()
     if not rdir.exists():
         return []
-    # Match both full ranking files and top50 files
+    rk = _ranking_cfg()
+    marker_full = f"_ranking{rk.get('full_suffix', '')}"
+    marker_sub = f"_ranking{rk.get('subset_suffix', '_top50')}"
     names = set()
-    for f in rdir.glob("*_ranking*.csv"):
-        name = f.stem.replace("_ranking_top50", "").replace("_ranking", "")
-        if name:
-            names.add(name)
+    for f in rdir.glob(rk.get("glob", "*_ranking*.csv")):
+        stem = f.stem
+        for marker in (marker_sub, marker_full, "_ranking"):
+            if marker and stem.endswith(marker):
+                stem = stem[: -len(marker)]
+                break
+        if stem:
+            names.add(stem)
     return sorted(names)
 
 
-def load_ranking(maqam: str, full: bool = False):
-    rdir = results_dir()
-    top50 = rdir / f"{maqam}_ranking_top50.csv"
-    full_csv = rdir / f"{maqam}_ranking.csv"
-    target = full_csv if (full or not top50.exists()) else top50
+# Historical alias: a "maqam" is just the default experiment's category noun.
+list_maqams = list_categories
+
+
+def load_ranking(category: str, full: bool = False):
+    rk = _ranking_cfg()
+    subset = _ranking_path(category, rk.get("subset_suffix", "_top50"))
+    full_csv = _ranking_path(category, rk.get("full_suffix", ""))
+    target = full_csv if (full or not subset.exists()) else subset
     if not target.exists():
         return None
     df = pd.read_csv(target, encoding="utf-8-sig")
     df.columns = [c.strip().lower() for c in df.columns]
-    return df
+    return _canonicalize(df)
 
 
 # --------------------------------------------------------------------------
@@ -368,7 +591,9 @@ def save_rating(maqam: str, item_id: str, stars):
     else:
         data["ratings"][item_id] = {"stars": int(stars), "rated_at": _now_iso()}
 
+    # `maqam` kept for backward compatibility; `category` is the generic name.
     data["maqam"] = maqam
+    data["category"] = maqam
     data["updated"] = _now_iso()
 
     with open(p, "w", encoding="utf-8") as f:
@@ -387,12 +612,17 @@ def _row_filename(r) -> str:
 
 def _row_id(r) -> str:
     """Per-take identity for a ranking row (pandas Series / row dict)."""
+    explicit = r.get("item_id") if hasattr(r, "get") else None
+    if explicit is not None:
+        s = str(explicit).strip()
+        if s and s.lower() not in ("nan", "none"):
+            return s
     return item_identity(r.get("filename"), r.get("file"))
 
 
-def maqam_stats(name: str):
-    """Per-maqam rating stats over the FULL ranking (ratings are keyed by
-    per-take id, so a rating given in top-50 mode is still counted here)."""
+def category_stats(name: str):
+    """Per-category rating stats over the FULL ranking (ratings are keyed by
+    per-take id, so a rating given in subset mode is still counted here)."""
     df = load_ranking(name, full=True)
     if df is None or not len(df):
         return None
@@ -422,11 +652,15 @@ def maqam_stats(name: str):
     }
 
 
+# Historical alias.
+maqam_stats = category_stats
+
+
 def collect_stats():
-    maqams = [m for m in (maqam_stats(n) for n in list_maqams()) if m]
-    cand = sum(m["total"] for m in maqams)
-    rated = sum(m["rated"] for m in maqams)
-    hist = {k: sum(m["stars"][k] for m in maqams) for k in range(1, 6)}
+    categories = [m for m in (category_stats(n) for n in list_categories()) if m]
+    cand = sum(m["total"] for m in categories)
+    rated = sum(m["rated"] for m in categories)
+    hist = {k: sum(m["stars"][k] for m in categories) for k in range(1, 6)}
     rated_avg = (sum(k * v for k, v in hist.items()) / rated) if rated else None
     return {
         "totals": {
@@ -437,7 +671,8 @@ def collect_stats():
             "avg_stars": round(rated_avg, 2) if rated_avg is not None else None,
             "stars": hist,
         },
-        "maqams": maqams,
+        "maqams": categories,
+        "categories": categories,
     }
 
 
@@ -458,6 +693,7 @@ def index():
 
 def _config_payload():
     rdir, adir, refd = results_dir(), audio_root(), ref_dir()
+    n = len(list_categories())
     return {
         "results_dir": str(rdir),
         "audio_root": str(adir),
@@ -466,7 +702,10 @@ def _config_payload():
         "audio_root_exists": adir.exists(),
         "ref_dir_exists": refd.exists(),
         "indexed_files": len(build_audio_index()),
-        "maqam_count": len(list_maqams()),
+        # `maqam_count` kept for backward compatibility.
+        "maqam_count": n,
+        "category_count": n,
+        "experiment": EXPERIMENT,
         "is_configured": rdir.exists() and adir.exists(),
     }
 
@@ -533,11 +772,12 @@ def api_browse():
 
 
 @app.route("/api/maqams")
-def api_maqams():
-    maqams = []
-    for m in list_maqams():
+@app.route("/api/categories")
+def api_categories():
+    categories = []
+    for m in list_categories():
         df = load_ranking(m, full=False)
-        maqams.append(
+        categories.append(
             {
                 "name": m,
                 "arabic": MAQAM_ARABIC.get(m, ""),
@@ -545,29 +785,40 @@ def api_maqams():
                 "has_ref": resolve_ref_file(m) is not None,
             }
         )
-    return jsonify({"maqams": maqams, "config": _config_payload()})
+    return jsonify(
+        {
+            "maqams": categories,       # backward-compatible key
+            "categories": categories,
+            "experiment": EXPERIMENT,
+            "config": _config_payload(),
+        }
+    )
 
 
-@app.route("/api/maqam/<maqam>")
-def api_maqam(maqam):
+@app.route("/api/maqam/<category>")
+@app.route("/api/category/<category>")
+def api_category(category):
     full = request.args.get("full") == "1"
-    df = load_ranking(maqam, full=full)
+    df = load_ranking(category, full=full)
     if df is None:
-        abort(404, f"No ranking CSV found for maqam '{maqam}'")
+        abort(404, f"No ranking CSV found for category '{category}'")
 
-    ratings = load_ratings(maqam)
+    ratings = load_ratings(category)
 
     rows = []
     for _, r in df.iterrows():
         iid = _row_id(r)
+        rank = _as_int(r.get("rank"))
+        if not iid or rank is None:
+            continue  # cannot present an unranked/unidentifiable row
         local = resolve_audio(iid)
         filename = _row_filename(r)
         rows.append(
             {
                 "id": iid,
-                "rank": int(r.get("rank")),
+                "rank": rank,
                 "filename": filename,
-                "similarity": float(r.get("similarity", 0.0)),
+                "similarity": _as_float(r.get("similarity"), 0.0),
                 "found": local is not None,
                 "stars": ratings.get(iid, {}).get("stars"),
             }
@@ -575,9 +826,10 @@ def api_maqam(maqam):
 
     return jsonify(
         {
-            "maqam": maqam,
-            "arabic": MAQAM_ARABIC.get(maqam, ""),
-            "has_ref": resolve_ref_file(maqam) is not None,
+            "maqam": category,          # backward-compatible key
+            "category": category,
+            "arabic": MAQAM_ARABIC.get(category, ""),
+            "has_ref": resolve_ref_file(category) is not None,
             "total": len(rows),
             "rated_count": len(ratings),
             "rows": rows,
@@ -590,8 +842,9 @@ def api_stats():
     return jsonify(collect_stats())
 
 
-@app.route("/api/maqam/<maqam>/rating", methods=["POST"])
-def api_set_rating(maqam):
+@app.route("/api/maqam/<category>/rating", methods=["POST"])
+@app.route("/api/category/<category>/rating", methods=["POST"])
+def api_set_rating(category):
     """Set or clear a star rating (1-5, or null/0 to clear) for one take.
 
     The payload should carry the per-take `id` (e.g. 'majnoon_layla_18082026/
@@ -602,30 +855,31 @@ def api_set_rating(maqam):
     data = request.get_json(force=True, silent=True) or {}
     item_id = str(data.get("id") or "").strip()
     filename = str(data.get("filename") or "").strip()
-    stars = data.get("stars")
+    stars_raw = data.get("stars")
 
     if not item_id:
         if not filename:
             abort(400, "id (or a unique filename) is required")
-        ids = _basename_to_ids(maqam).get(filename)
+        ids = _basename_to_ids(category).get(filename)
         if not ids:
-            abort(400, f"'{filename}' does not appear in the '{maqam}' ranking")
+            abort(400, f"'{filename}' does not appear in the '{category}' ranking")
         if len(ids) > 1:
             abort(
                 400,
-                f"'{filename}' names multiple takes in '{maqam}'; "
+                f"'{filename}' names multiple takes in '{category}'; "
                 "resend with the per-take id "
                 f"({', '.join(sorted(ids))})",
             )
         item_id = next(iter(ids))
 
-    if stars is not None and stars != 0 and not (1 <= int(stars) <= 5):
+    stars = _as_int(stars_raw)
+    if stars is not None and stars != 0 and not (1 <= stars <= 5):
         abort(400, "stars must be an integer 1-5, or null/0 to clear")
 
-    stars = int(stars) if stars else None
-    save_rating(maqam, item_id, stars)
+    stars = stars if stars else None
+    save_rating(category, item_id, stars)
 
-    ratings = load_ratings(maqam)
+    ratings = load_ratings(category)
     return jsonify({"id": item_id, "stars": stars, "rated_count": len(ratings)})
 
 
@@ -640,18 +894,18 @@ def refresh_index():
 # --------------------------------------------------------------------------
 
 
-@app.route("/audio/ref/<maqam>")
-def audio_ref(maqam):
-    f = resolve_ref_file(maqam)
+@app.route("/audio/ref/<category>")
+def audio_ref(category):
+    f = resolve_ref_file(category)
     if not f or not f.exists():
         abort(404)
     return send_file(f)
 
 
-@app.route("/audio/track/<maqam>/<int:rank>")
-def audio_track(maqam, rank):
+@app.route("/audio/track/<category>/<int:rank>")
+def audio_track(category, rank):
     full = request.args.get("full") == "1"
-    df = load_ranking(maqam, full=full)
+    df = load_ranking(category, full=full)
     if df is None:
         abort(404)
     match = df[df["rank"] == rank]
@@ -660,7 +914,7 @@ def audio_track(maqam, rank):
     row = match.iloc[0]
     local = resolve_audio(_row_id(row))
     if not local or not Path(local).exists():
-        abort(404, f"Local audio file not found for rank {rank} in '{maqam}'")
+        abort(404, f"Local audio file not found for rank {rank} in '{category}'")
     return send_file(local)
 
 

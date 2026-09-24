@@ -1,0 +1,31 @@
+{
+  "id": "example_models",
+  "title": "Voice Model A/B",
+  "route_prefix": "model",
+  "labels": {"singular": "prompt", "plural": "prompts"},
+  "display": {},
+  "rtl": false,
+  "columns": {
+    "rank": null,
+    "name": "variant",
+    "score": "score",
+    "path": "path",
+    "id": null
+  },
+  "score": {
+    "direction": "desc",
+    "decimals": 1,
+    "bands": [
+      {"id": "hi", "label": "Strong", "qualitative": "Strong candidate", "min": 80, "max": 101},
+      {"id": "md", "label": "Fair", "qualitative": "Fair candidate", "min": 50, "max": 80},
+      {"id": "lo", "label": "Weak", "qualitative": "Weak candidate", "min": 0, "max": 50}
+    ]
+  },
+  "ranking": {
+    "glob": "*_ranking*.csv",
+    "full_suffix": "",
+    "subset_suffix": "_top50",
+    "subset_label": "Top 5"
+  },
+  "reference": {"mode": "none", "file": null}
+}
